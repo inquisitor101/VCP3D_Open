@@ -5,21 +5,21 @@
       real*8  :: dx, dy, dz, lx, ly, lz, x0, y0, z0
 
       ! Number of elements in i, j and k-direction
-      ni = 30 
-      nj = 15
-      nk = 15
+      ni = 12 
+      nj = 12
+      nk = 12
 
       lx = 2.d0  
-      ly = 1.d0
-      lz = 1.d0
+      ly = 2.d0
+      lz = 2.d0
 
       dx = lx/ni
       dy = ly/nj
       dz = lz/nk
 
       x0 = -1.0d0
-      y0 = -0.5d0
-      z0 = -0.5d0
+      y0 = -1.0d0
+      z0 = -1.0d0
 
       ! Write the grid to fort.10
       i = 1

@@ -38,12 +38,14 @@ InputParamClass::InputParamClass()
   mFBody[2] = zero;
   mFBodySpecified = false;
 
-	mPulseCenter[0] = zero;
-	mPulseCenter[1] = zero;
-	mPulseCenter[2] = zero;
-	mPulseStrength  = half;
-	mPulseWidth     = half;
-	mQuiescentFlow  = false;
+	mPulseCenter[0]   = zero;
+	mPulseCenter[1]   = zero;
+	mPulseCenter[2]   = zero;
+	mPulseStrength    = half;
+	mPulseWidth       = half;
+	mPulse1D          = false;
+	mPulseDirection1D = one; 
+	mQuiescentFlow    = false;
 
   mLowerCoorBoxFluctuations[0] = -valLarge;
   mLowerCoorBoxFluctuations[1] = -valLarge;
@@ -97,14 +99,27 @@ InputParamClass::InputParamClass()
 	mNSCBC_Outlet_OneMinusBeta = true;
 	mNSCBC_Outlet_AverageLocal = false;
 
-	mNSCBC_Outlet_len    = one;
-	mNSCBC_Outlet_sigma  = zero;
-	mNSCBC_Outlet_beta_l = one;
-	mNSCBC_Outlet_beta_t = one;
+	mNSCBC_Outlet_len     = one;
+	mNSCBC_Outlet_sigma   = zero;
+	mNSCBC_Outlet_beta_l  = one;
+	mNSCBC_Outlet_beta_t  = one;
 
-	mNSCBC_Inlet_len     = one;
-	mNSCBC_Inlet_sigma   = one;
-	mNSCBC_Inlet_beta    = zero;
+	mNSCBC_Inlet_len      = one;
+	mNSCBC_Inlet_sigma    = one;
+	mNSCBC_Inlet_incoming = true;
+
+	mCharacteristicMatchingLayer = false;
+
+	mSpongeLayer             = false;
+	mAveragedSolutionFile    = "";
+
+	for(unsigned int i=0; i<6; i++)
+	{
+		mSpongeLayerSpecified[i] = false;
+		mNSpongeLayerElements[i] = 0;
+		mDampingConstant[i]      = zero;
+		mDampingExponent[i]      = zero;
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -263,6 +278,23 @@ void InputParamClass::AnalyzeString(std::string &lineBuf)
 	if(keyword == "pressure pulse width")
 		return ReadDataFromString(keyword, value, &mPulseWidth);
 
+  if(keyword == "one-dimensional pulse")
+    return CheckYesNoKeyword(keyword, value, mPulse1D);
+
+	if(keyword == "pulse (x-)direction")
+  {
+    CreateLowerCase(value);
+    if(     value == "upstream")
+      mPulseDirection1D = -one;
+    else if(value == "downstream")
+      mPulseDirection1D =  one;
+    else
+     TerminateAll("InputParamClass::AnalyzeString", __FILE__, __LINE__,
+                   "Unknown \"Pressure (x-)direction\" specified");
+    return;
+  }
+
+
   if(keyword == "lower coordinates box for fluctuations")
    return ReadDataFromString(keyword, value, mLowerCoorBoxFluctuations, 3);
 
@@ -388,8 +420,17 @@ void InputParamClass::AnalyzeString(std::string &lineBuf)
 		return ReadDataFromString(keyword, value, &mNSCBC_Inlet_len);
 	if(keyword == "inlet normal relaxation (sigma)")
 		return ReadDataFromString(keyword, value, &mNSCBC_Inlet_sigma);
-	if(keyword == "inlet transverse relaxation (beta)")
-		return ReadDataFromString(keyword, value, &mNSCBC_Inlet_beta);
+	if(keyword == "inlet use outgoing wave amplitude")
+		return CheckYesNoKeyword(keyword, value, mNSCBC_Inlet_incoming);
+
+	if(keyword == "averaged solution file name") {mAveragedSolutionFile = value; return;}
+
+	if(keyword == "sponge layer")
+		return CheckYesNoKeyword(keyword, value, mSpongeLayer);
+
+	if(keyword == "characteristic matching layer")
+		return CheckYesNoKeyword(keyword, value, mCharacteristicMatchingLayer);
+
 
   // Unknown keyword. Print an error message and terminate.
   std::ostringstream message;
@@ -534,6 +575,11 @@ void InputParamClass::CheckParameters(void)
   if(mLowerCoorBoxFluctuations[2] >= mUpperCoorBoxFluctuations[2])
     TerminateAll("InputParamClass::CheckParameters", __FILE__, __LINE__,
                  "Wrong z-coordinates of the box for fluctuations");
+
+  if(mSpongeLayer && mAveragedSolutionFile == "")
+    TerminateAll("InputParamClass::CheckParameters", __FILE__, __LINE__,
+                 "\"Averaged solution file name\" not specified in parameter file");
+
 
   // Overwrite some parameters, depending on the value of other parameters.
   if(mNSave < 0) mNSave = 0;
@@ -1146,6 +1192,150 @@ void InputParamClass::DetermineNonDimPrimVarFreeStream(su2double *primVar) const
 
 //------------------------------------------------------------------------------
 
+// Function to read the sponge layer data on each side of the block.
+void InputParamClass::ReadSpongeLayerData(const char *fileName)
+{
+  std::ostringstream message;
+
+  // Open the file for reading. If not successful terminate.
+  // file is created.
+  std::ifstream spongeDataFile(fileName);
+  if( !spongeDataFile )
+  {
+    message << "Sponge layer data file " << fileName << " not found.";
+    TerminateAll("InputParamClass::ReadSpongeLayerData",
+                 __FILE__, __LINE__, message.str());
+  }
+
+  // While loop to find the keyword "Sponge layer information".
+  std::string lineBuf;
+  bool stringFound = false;
+  while( std::getline(spongeDataFile, lineBuf) )
+  {
+    // Replace all tab and return characters, remove the leading
+    // and trailing blanks and create a lower case version.
+    ReplaceTabsAndReturns(lineBuf);
+    RemoveBlanks(lineBuf);
+    CreateLowerCase(lineBuf);
+
+    // Check if the string equals "sponge layer information".
+    // If so, set stringFound to true and break the loop.
+    if(lineBuf == "sponge layer information")
+    {
+      stringFound = true;
+      break;
+    }
+  }
+
+  // Check if the sponge layer information was found. If not, terminate.
+  if( !stringFound )
+	{
+		message << "Keyword \"Sponge layer information\" not found in the file " << fileName << ".";
+    TerminateAll("InputParamClass::ReadSpongeLayerData",
+                 __FILE__, __LINE__, message.str());
+	}
+
+
+	// Loop over the 6 faces of the block.
+  for(int i=0; i<6; ++i)
+  {
+    // While loop until the information of the current face is found.
+    stringFound = false;
+    while( std::getline(spongeDataFile, lineBuf) )
+    {
+      // Couple an istringstream to lineBuf.
+      std::istringstream istr(lineBuf);
+
+      // Check if this is the desired string. If so, read the sponge layer information.
+      int faceID;
+      if( (istr >> faceID) )
+      {
+        if(faceID == (i+1))
+        {
+          int nb; su2double ss, aa;
+					// Extract line information.
+          istr >> nb >> ss >> aa;
+					// Assign number of extruded elements, per boundary.
+          mNSpongeLayerElements[i] = nb;
+					// Assign damping constant, per boundary.
+					mDampingConstant[i]      = ss;
+					// Assign damping exponent, per boundary.
+					mDampingExponent[i]      = aa;
+
+					// Set string as found.
+					stringFound = true;
+        }
+				else
+				{
+  				message << "Sponge layer is not specified for face: " << (i+1) << ", (use nbElem = 0 as off).";
+  				TerminateAll("InputParamClass::ReadSpongeLayerData",
+  				             __FILE__, __LINE__, message.str());
+  			}
+      }
+
+      // Break the while loop if the string was found.
+      if( stringFound ) break;
+    }
+  }
+
+	// Consistency check: make sure the number of elements is positive.
+	for(int i=0; i<6; i++)
+	{
+		// Extract current number of elements in this layer.
+		const int nbElem = mNSpongeLayerElements[i];
+
+		// Consistency check.
+		if( nbElem < 0 )
+		{
+			message << "Sponge layer cannot have negative number of elements in face: " << (i+1);
+			TerminateAll("InputParamClass::ReadSpongeLayerData", 
+									 __FILE__, __LINE__, message.str());
+		}
+		else
+		{
+			// Check which block side uses a sponge layer.
+			mSpongeLayerSpecified[i] = ( nbElem ) ? true : false;
+		}
+	}
+
+	// Consistency check: make sure at least one sponge layer exists..
+	if( !mSpongeLayerSpecified[0] && !mSpongeLayerSpecified[1] && 
+			!mSpongeLayerSpecified[2] && !mSpongeLayerSpecified[3] && 
+		  !mSpongeLayerSpecified[4] && !mSpongeLayerSpecified[5] )
+		TerminateAll("InputParamClass::ReadSpongeLayerData", __FILE__, __LINE__,
+								 "No sponge layer elements have been detected in a sponge layer simulation.");
+
+
+	// Report the sponge layer information extracted.
+	if(rank == 0)
+	{
+#ifdef HAVE_OPENMP
+#pragma omp single nowait
+#endif
+    {
+			// Write the sponge layer parameters header.
+			std::cout << "#------------------------------------------------------------------\n";
+			std::cout << "# Sponge layer  |  Face  |  nbElem  |    sigma     |    alpha     |\n";
+			std::cout << "#------------------------------------------------------------------\n";
+
+			// Write data, per side.
+			for(int i=0; i<6; i++)
+			{
+				std::cout << std::boolalpha << "#\t"
+									<< mSpongeLayerSpecified[i] << "\t    "
+									<< i+1                      << "\t      ";
+				std::cout << std::scientific
+									<< mNSpongeLayerElements[i] << "\t      "
+									<< mDampingConstant[i]      << "   "
+									<< mDampingExponent[i]      << std::endl;
+			}
+			std::cout << "#------------------------------------------------------------------" << std::endl;;
+		}
+	}
+}
+
+//------------------------------------------------------------------------------
+
 // Function to read the prescribed boundary data.
 void InputParamClass::ReadBoundaryData(const char *fileName)
 {
@@ -1359,8 +1549,9 @@ void InputParamClass::ReadSubfaceInformation(const char *fileName)
       else if(BCSubface == "bcinflowsupersonic")      mSubfaces[i][j] = new BCInflowSupersonicSubfaceClass(istr);
       else if(BCSubface == "bcoutflowsubsonic")       mSubfaces[i][j] = new BCOutflowSubsonicSubfaceClass(istr);
       else if(BCSubface == "bcoutflowsupersonic")     mSubfaces[i][j] = new BCOutflowSupersonicSubfaceClass(istr);
-			else if(BCSubface == "bcinflowcharacteristic")  mSubfaces[i][j] = new BCInflowCharacteristicSubfaceClass(istr);
-			else if(BCSubface == "bcoutflowcharacteristic") mSubfaces[i][j] = new BCOutflowCharacteristicSubfaceClass(istr);
+			else if(BCSubface == "bcinflowstaticnscbc")     mSubfaces[i][j] = new BCInflowStaticCharacteristicSubfaceClass(istr);
+			else if(BCSubface == "bcinflowtotalnscbc")      mSubfaces[i][j] = new BCInflowTotalCharacteristicSubfaceClass(istr);
+			else if(BCSubface == "bcoutflownscbc")          mSubfaces[i][j] = new BCOutflowCharacteristicSubfaceClass(istr);
 			else
       {
         message << "Unknown boundary condition \"" << BCSubfaceOr << "\".";
@@ -1376,8 +1567,7 @@ void InputParamClass::ReadSubfaceInformation(const char *fileName)
 			mSubfaces[i][j]->mSubfacesID = j;
 
 			// Set NSCBC condition to true, if characteristic inlet/outlet are specified.
-			if( mSubfaces[i][j]->GetTypeBoundaryPrescribed() == BC_OUTFLOW_CHARACTERISTIC ) mNSCBC_Specified = true;
-			if( mSubfaces[i][j]->GetTypeBoundaryPrescribed() == BC_INFLOW_CHARACTERISTIC  ) mNSCBC_Specified = true;
+			if( mSubfaces[i][j]->IsCharacteristicBC() ) mNSCBC_Specified = true;
     }
   }
 

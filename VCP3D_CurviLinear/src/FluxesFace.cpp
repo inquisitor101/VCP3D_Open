@@ -49,8 +49,7 @@ void FluxesBoundaryFace(const InputParamClass                                   
   // Determine whether or not a wall model is used.
   const bool useWallModel = BC->UseWallModel();
  	// Determine whether or not a NSCBC boundary is used.
-	const bool useNSCBC     =  ( BC->GetTypeBoundaryPrescribed() == BC_OUTFLOW_CHARACTERISTIC
-												    || BC->GetTypeBoundaryPrescribed() == BC_INFLOW_CHARACTERISTIC );
+	const bool useNSCBC     = BC->IsCharacteristicBC();
 
   // Initialize the padded values to avoid problems.
   for(int l=0; l<nVar; ++l)

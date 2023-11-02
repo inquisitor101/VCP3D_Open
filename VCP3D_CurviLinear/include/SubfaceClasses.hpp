@@ -166,6 +166,10 @@ public:
 	// condition prescribed. It is overwritten by the derived class.
 	virtual int GetTypeBoundaryPrescribed(void);
 
+	// Virtual function, which determines whether or not the boundary is of 
+	// a characteristic nature (inlet or outlet).
+	virtual bool IsCharacteristicBC(void);
+
   //------------------------------------------
   // Public member variables.
   //------------------------------------------
@@ -865,11 +869,11 @@ private:
   // Private member variables.
   //------------------------------------------
 
-  // Boolean, which indicates whether or not total
+	// Boolean, which indicates whether or not total
   // conditions have been specified.
   bool mTotalConditionsSpecified;
-
-  //------------------------------------------
+  
+	//------------------------------------------
   // Private member functions.
   //------------------------------------------
 
@@ -1129,6 +1133,10 @@ public:
 	// Function, which sets the value of mMachAverageBoundary.
 	void SetMachAverageBoundary(const su2double Mavg);
 
+	// Function, which flags that this is a characteristic boundary. 
+	bool IsCharacteristicBC(void) override;
+
+
   // Pure virtual function, which makes available the number 
 	// of prescribed variables.
   virtual int GetNVarPrescribed(void) = 0;
@@ -1369,7 +1377,7 @@ private:
 
 
 //------------------------------------------------------------------------------
-// Characteristic BC: Inlet
+// Characteristic BC: Inlet (generic)
 //------------------------------------------------------------------------------
 
 class BCInflowCharacteristicSubfaceClass : public BCStandardCharacteristicSubfaceClass
@@ -1383,7 +1391,112 @@ public:
 	BCInflowCharacteristicSubfaceClass(std::istringstream &istr);
 
 	// Destructor. Nothing to be done.
-	~BCInflowCharacteristicSubfaceClass();
+	virtual ~BCInflowCharacteristicSubfaceClass();
+
+  //----------------------------------------------------------
+  // Public member functions, which overload the virtual
+  // functions of the base class.
+  //----------------------------------------------------------
+
+  // Pure virtual function, which makes available the number of prescribed variables.
+  virtual int GetNVarPrescribed(void) = 0;
+
+	// Pure virtual function, which makes available the type of boundary 
+	// condition prescribed. 
+	virtual int GetTypeBoundaryPrescribed(void) = 0;
+ 
+	// Function, which configures the tuning parameters required for a NSCBC.
+	void ConfigureParamNSCBC(const InputParamClass 			*inputParam, 
+													 const StandardElementClass *standardHex,
+													 su2double            		 **metric,
+													 su2double                   factNorm);
+
+  // Pure virtual function, which computes the boundary state (the right state) from the
+  // given left state and the prescribed boundary data.
+  virtual void ComputeBoundaryState(const InputParamClass      *inputParam,
+		                                const StandardElementClass *standardHex,
+                                    const int                   nInt,
+                                    su2double                 **solL,
+                                    su2double                 **dSolDxL,
+                                    su2double                 **dSolDyL,
+                                    su2double                 **dSolDzL,
+                                    const su2double             factNorm,
+                                    su2double                 **metricL,
+                                    su2double                 **prescribedData,
+                                    su2double                 **solR,
+                                    su2double                 **dSolDxR,
+                                    su2double                 **dSolDyR,
+                                    su2double                 **dSolDzR,
+                                    bool                       &heatFluxPrescribed,
+                                    su2double                 *&prescribedWallData,
+                                    su2double                  &wallPerm) = 0;
+
+protected:
+  //------------------------------------------
+  // Protected member variables.
+  //------------------------------------------
+
+	// Index of the incoming(+) acoustic wave amplitude.
+  int mIndexPhi;
+	// Index of the outgoing(-) acoustic wave amplitude.
+	int mIndexPsi;
+	// Lagrange derivative coefficient at boundary w.r.t 
+	// normal (rr-)dimension.
+	su2double mDerCoefficient;
+
+	// Characteristic length scale.
+	su2double mLengthScale;
+	// Normal relaxation coefficient.
+	su2double mSigma;
+
+private:
+  //------------------------------------------
+  // Private member variables.
+  //------------------------------------------
+
+	//------------------------------------------
+  // Private member functions.
+  //------------------------------------------
+
+  // Pure virtual function, which converts the prescribed data to the required form,
+  // i.e. the pressure is made non-dimensional.
+  virtual void ConvertPrescribedData(const int                nIntegration,
+                                     const ENUM_FEM_VARIABLES FEMVariables,
+                                     std::vector<su2double *> &prescribedData) = 0;
+
+  // Pure virtual function, which gets the names of the prescribed variables for the given set.
+  virtual void GetNamesPrescibedVariables(const int                set,
+                                          std::vector<std::string> &varNames) = 0;
+
+  // Pure virtual function, which returns the number of data sets that can be prescribed.
+  virtual int GetNSetsPrescribedVariables(void) = 0;
+
+  // Pure virtual function, which indicates whether prescribed data is expected.
+  virtual bool ExpectPrescribedData(void) = 0;
+
+  // Pure virtual function, which determines the indices for the prescribed data.
+  virtual void SetIndicesPrescribedData(const int set) = 0;
+
+};
+
+
+
+//------------------------------------------------------------------------------
+// Characteristic BC: Inlet (static)
+//------------------------------------------------------------------------------
+
+class BCInflowStaticCharacteristicSubfaceClass : public BCInflowCharacteristicSubfaceClass 
+{
+public:
+  //------------------------------------------
+  // Constructors and destructors.
+  //------------------------------------------
+
+	// Overloaded constructor. Read the subface data.
+	BCInflowStaticCharacteristicSubfaceClass(std::istringstream &istr);
+
+	// Destructor. Nothing to be done.
+	~BCInflowStaticCharacteristicSubfaceClass();
 
   //----------------------------------------------------------
   // Public member functions, which overload the virtual
@@ -1397,12 +1510,6 @@ public:
 	// condition prescribed. 
 	int GetTypeBoundaryPrescribed(void);
  
-	// Function, which configures the tuning parameters required for a NSCBC.
-	void ConfigureParamNSCBC(const InputParamClass 			*inputParam, 
-													 const StandardElementClass *standardHex,
-													 su2double            		 **metric,
-													 su2double                   factNorm);
-
   // Function, which computes the boundary state (the right state) from the
   // given left state and the prescribed boundary data.
   void ComputeBoundaryState(const InputParamClass      *inputParam,
@@ -1428,27 +1535,9 @@ private:
   // Private member variables.
   //------------------------------------------
 
-	// Index of the incoming(+) acoustic wave amplitude.
-  int mIndexPhi;
-	// Lagrange derivative coefficient at boundary w.r.t 
-	// normal (rr-)dimension.
-	su2double mDerCoefficient;
-
-	// Characteristic length scale.
-	su2double mLengthScale;
-	// Normal     relaxation coefficient.
-	su2double mSigma;
-	// Transverse relaxation coefficient.
-	su2double mBeta;
-
-
-
 	//------------------------------------------
   // Private member functions.
   //------------------------------------------
-
-	// Boolean, which indicates whether or not total conditions are specified.
-	bool mTotalConditionsSpecified;
 
   // Function, which converts the prescribed data to the required form,
   // i.e. the pressure is made non-dimensional.
@@ -1471,5 +1560,86 @@ private:
 
 };
 
+
+
+
+//------------------------------------------------------------------------------
+// Characteristic BC: Inlet (total)
+//------------------------------------------------------------------------------
+
+class BCInflowTotalCharacteristicSubfaceClass : public BCInflowCharacteristicSubfaceClass 
+{
+public:
+  //------------------------------------------
+  // Constructors and destructors.
+  //------------------------------------------
+
+	// Overloaded constructor. Read the subface data.
+	BCInflowTotalCharacteristicSubfaceClass(std::istringstream &istr);
+
+	// Destructor. Nothing to be done.
+	~BCInflowTotalCharacteristicSubfaceClass();
+
+  //----------------------------------------------------------
+  // Public member functions, which overload the virtual
+  // functions of the base class.
+  //----------------------------------------------------------
+
+  // Function, which makes available the number of prescribed variables.
+  int GetNVarPrescribed(void);
+
+	// Function, which makes available the type of boundary 
+	// condition prescribed. 
+	int GetTypeBoundaryPrescribed(void);
+ 
+  // Function, which computes the boundary state (the right state) from the
+  // given left state and the prescribed boundary data.
+  void ComputeBoundaryState(const InputParamClass      *inputParam,
+		                        const StandardElementClass *standardHex,
+                            const int                   nInt,
+                            su2double                 **solL,
+                            su2double                 **dSolDxL,
+                            su2double                 **dSolDyL,
+                            su2double                 **dSolDzL,
+                            const su2double             factNorm,
+                            su2double                 **metricL,
+                            su2double                 **prescribedData,
+                            su2double                 **solR,
+                            su2double                 **dSolDxR,
+                            su2double                 **dSolDyR,
+                            su2double                 **dSolDzR,
+                            bool                       &heatFluxPrescribed,
+                            su2double                 *&prescribedWallData,
+                            su2double                  &wallPerm);
+
+private:
+  //------------------------------------------
+  // Private member variables.
+  //------------------------------------------
+
+	//------------------------------------------
+  // Private member functions.
+  //------------------------------------------
+
+  // Function, which converts the prescribed data to the required form,
+  // i.e. the pressure is made non-dimensional.
+  void ConvertPrescribedData(const int                nIntegration,
+                             const ENUM_FEM_VARIABLES FEMVariables,
+                             std::vector<su2double *> &prescribedData);
+
+  // Function, which gets the names of the prescribed variables for the given set.
+  void GetNamesPrescibedVariables(const int                set,
+                                  std::vector<std::string> &varNames);
+
+  // Function, which returns the number of data sets that can be prescribed.
+  int GetNSetsPrescribedVariables(void);
+
+  // Function, which indicates whether prescribed data is expected.
+  bool ExpectPrescribedData(void);
+
+  // Function, which determines the indices for the prescribed data.
+  void SetIndicesPrescribedData(const int set);
+
+};
 
 

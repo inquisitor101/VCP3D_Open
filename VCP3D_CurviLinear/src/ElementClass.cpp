@@ -92,6 +92,16 @@ ElementClass::ElementClass(const InputParamClass      *inputParam,
   // for owned elements.
   mLocalInd[0] = mLocalInd[1] = mLocalInd[2] = 0;
 
+	// Initialze the element to a standard, non-sponge-layer type.
+	mSpongeLayerElement = false;
+
+	mSpongeXMIN = false;
+	mSpongeXMAX = false;
+	mSpongeYMIN = false;
+	mSpongeYMAX = false;
+	mSpongeZMIN = false;
+	mSpongeZMAX = false;
+
   // Copy the element type and the global indices.
   mElemType = elemType;
 
@@ -233,6 +243,12 @@ ElementClass::~ElementClass()
   for(unsigned long i=0; i<mVolMetricSolDOFs.size(); ++i)
     FreeMemory((void **) &mVolMetricSolDOFs[i]);
 
+  for(unsigned long i=0; i<mDampingFunction.size(); ++i)
+    FreeMemory((void **) &mDampingFunction[i]);
+
+	for(unsigned long i=0; i<mDampingState.size(); ++i)
+    FreeMemory((void **) &mDampingState[i]);
+
   for(unsigned long i=0; i<mSol.size(); ++i)
     FreeMemory((void **) &mSol[i]);
 
@@ -335,9 +351,7 @@ void ElementClass::TuningParamNSCBC(const InputParamClass 		 *inputParam,
 
 		// Assign values, if NSCBC iBoundary exists.
 		if(  BC != NULL && BC->mBoundaryID == iBoundary) 
-			if( BC->GetTypeBoundaryPrescribed() == BC_OUTFLOW_CHARACTERISTIC 
-				  ||
-				  BC->GetTypeBoundaryPrescribed() == BC_INFLOW_CHARACTERISTIC )
+			if( BC->IsCharacteristicBC() )
 		{
 			// Configure boundary.
 			BC->ConfigureParamNSCBC(inputParam, standardHex, metric, dirSign);
@@ -443,9 +457,7 @@ void ElementClass::AverageMachNSCBC(const InputParamClass       *inputParam,
 
 		// Execute averaging process, if NSCBC iBoundary exists.
 		if( BC != NULL && BC->mBoundaryID == iBoundary )
-			if( BC->GetTypeBoundaryPrescribed() == BC_OUTFLOW_CHARACTERISTIC
-			    || 
-					BC->GetTypeBoundaryPrescribed() == BC_INFLOW_CHARACTERISTIC )
+			if( BC->IsCharacteristicBC() )
 		{
 	  	// Compute the solution in the integration points of the face. 
 			// The solution corresponds to the BC face of this element, 
@@ -489,9 +501,7 @@ void ElementClass::SetAverageBoundaryMachNSCBC(const su2double *value)
 
 		// Assign values, if NSCBC iBoundary exists.
 		if( BC != NULL && BC->mBoundaryID == iBoundary )
-			if( BC->GetTypeBoundaryPrescribed() == BC_OUTFLOW_CHARACTERISTIC
-			    || 
-					BC->GetTypeBoundaryPrescribed() == BC_INFLOW_CHARACTERISTIC )
+			if( BC->IsCharacteristicBC() )
 		{
 			// Assign data required.
 			BC->SetMachAverageBoundary(value[iBoundary]);
@@ -602,22 +612,57 @@ void ElementClass::AddFluctuationsPrimVar(const InputParamClass      *inputParam
 			// Characteristic coefficient in Gaussian exponential.
 			const su2double cc = half/(w0*w0); 
 
-			// Loop over the DOFs.
-			for(int l=0; l<nDOFs; ++l)
+			// Check whether the pulse is 3D or 1D. Loop over the DOFs accordingly.
+			if( inputParam->mPulse1D)
 			{
-				// Extract coordinates, with respect to pulse center.
-				const su2double dx = mCoorNodalSolDOFs[0][l] - x0;
-				const su2double dy = mCoorNodalSolDOFs[1][l] - y0;
-				const su2double dz = mCoorNodalSolDOFs[2][l] - z0;
+				// Extract the pulse direction.
+				const su2double sign = inputParam->mPulseDirection1D;
 
-				// Compute radial distance squared.
-				const su2double r2 = dx*dx + dy*dy + dz*dz;
+				// This is a 1D pulse in the x-direction.
+				for(int l=0; l<nDOFs; ++l)
+				{
+					// Extract coordinates, with respect to pulse center.
+					const su2double dx = mCoorNodalSolDOFs[0][l] - x0;
+					const su2double dy = mCoorNodalSolDOFs[1][l] - y0;
+					const su2double dz = mCoorNodalSolDOFs[2][l] - z0;
 
-				// Extract the background pressure.
-				const su2double pinf = primVar[4][l];
+					// Extract the background pressure.
+					const su2double pinf = primVar[4][l];
 
-				// Store the new perturbed pressure.
-				primVar[4][l] = pinf*( one + d0*EXP(-r2*cc) );
+					// Extract the background density and u-velocity.
+					const su2double rhoinf = primVar[0][l];
+					const su2double uinf   = primVar[1][l];
+
+					// Compute the speed of sound.
+					const su2double ovrhoainf = one/SQRT( GamConstant*pinf*rhoinf ); 
+					
+					// Gaussian function.
+					const su2double gg  = pinf*d0*EXP(-dx*dx*cc);
+
+					// Store the new perturbed pressure and u-velocity.
+					primVar[4][l] += gg;
+					primVar[1][l] += sign*gg*ovrhoainf;
+				}
+			}
+			else
+			{
+				// This is a 3D pulse.
+				for(int l=0; l<nDOFs; ++l)
+				{
+					// Extract coordinates, with respect to pulse center.
+					const su2double dx = mCoorNodalSolDOFs[0][l] - x0;
+					const su2double dy = mCoorNodalSolDOFs[1][l] - y0;
+					const su2double dz = mCoorNodalSolDOFs[2][l] - z0;
+
+					// Compute radial distance squared.
+					const su2double r2 = dx*dx + dy*dy + dz*dz;
+
+					// Extract the background pressure.
+					const su2double pinf = primVar[4][l];
+
+					// Store the new perturbed pressure.
+					primVar[4][l] = pinf*( one + d0*EXP(-r2*cc) );
+				}
 			}
 
 			break;
@@ -3779,11 +3824,12 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
   // Step 1: Compute the solution and the gradients in the integration points.
   //--------------------------------------------------------------------------
 
-  // Set the pointers for the solution and its gradients.
+  // Set the pointers for the solution, its gradients and the buffer layer terms.
   su2double **Var    = workArray;
   su2double **dVarDx = Var    + nVar;
   su2double **dVarDy = dVarDx + nVar;
   su2double **dVarDz = dVarDy + nVar;
+	su2double **bufVar = dVarDz + nVar;
 
   // Set the pointer for the eddy viscosity.
   su2double *eddyVis = dVarDz[nVar];
@@ -3828,8 +3874,251 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
     }
   }
 
+
   //--------------------------------------------------------------------------
-  // Step 2: Convert the working variables and its gradients to primitive
+  // Step 2: Compute the characteristic matching layer contribution, if
+	// specified. This also serves as the initialization of the residual.
+  //--------------------------------------------------------------------------
+
+  // Initialize the residual to zero.
+  for(int l=0; l<nVar; ++l)
+#pragma omp simd
+    for(int m=0; m<nDOFsPad; ++m)
+      mRes[l][m] = zero;
+
+	// Check if a characteristic matching layer is specified. For now, it 
+	// suffices to have the layer in the sponge layer. 
+	if( inputParam->mCharacteristicMatchingLayer && mSpongeLayerElement ) 
+	{
+		// No need to implement the conservative variable formulation.
+		if( inputParam->mFEMVariables != ENTROPY_VARIABLES )
+			Terminate("ElementClass::VolumeResidual", __FILE__, __LINE__,
+					      "Working variables must be entropy in a matching layer.");
+
+		// Deduce the layer orientation.
+		const su2double nx = ( mSpongeXMIN ) ? -one : one;
+		const su2double ny = ( mSpongeYMIN ) ? -one : one;
+		const su2double nz = ( mSpongeZMIN ) ? -one : one;
+
+		// Deduce the scaling factor needed to normalize the damping function 
+		// into the range: [0, 1].
+		su2double ovsx = zero, ovsy = zero, ovsz = zero;
+
+		if( mSpongeXMIN ) ovsx = mMatchingScaleXMIN; 
+		if( mSpongeXMAX ) ovsx = mMatchingScaleXMAX; 
+		if( mSpongeYMIN ) ovsy = mMatchingScaleYMIN; 
+		if( mSpongeYMAX ) ovsy = mMatchingScaleYMAX; 
+		if( mSpongeZMIN ) ovsz = mMatchingScaleZMIN; 
+		if( mSpongeZMAX ) ovsz = mMatchingScaleZMAX; 
+
+    // The entropy variables are used as working variables.
+    // Easier storage of some expressions involving gamma.
+    const su2double gm1   =  GamConstant - one;
+    const su2double ov1mg = -one/gm1;
+		const su2double ovgm1 = -ov1mg;
+
+    // Loop over the (padded) number of integration points.
+#pragma omp simd
+    for(int l=0; l<nIntPad; ++l)
+    {
+      // Determine the multiplication weight for the source terms. This weight
+      // is the weight of this integration point multiplied by the Jacobian.
+      // The plus sign is present, because both the damping terms are the 
+			// residual of the Navier-Stokes equations are defined on the LHS.
+      const su2double weight = -mVolMetricInt[0][l]*standardHex->mIntWeights[l];
+
+			// Extract the weighted matching functions acting on this point.
+			// Note, the scaling is used in order to normalize the damping  
+			// function from [0, sigma] to the range: [0, 1].
+			const su2double wx  = weight*ovsx*mDampingFunction[0][l]; 
+			const su2double wy  = weight*ovsy*mDampingFunction[1][l]; 
+			const su2double wz  = weight*ovsz*mDampingFunction[2][l]; 
+
+
+			// Compute the primitive variables from the entropy ones.
+      const su2double V4Inv =  one/Var[4][l];
+      const su2double u     = -V4Inv*Var[1][l];
+      const su2double v     = -V4Inv*Var[2][l];
+      const su2double w     = -V4Inv*Var[3][l];
+      const su2double ek    =  half*(u*u + v*v + w*w);
+      const su2double s     =  GamConstant - gm1*(Var[0][l] - Var[4][l]*ek);
+      const su2double tmp   = -Var[4][l]*EXP(s);
+      const su2double rho   =  POW(tmp, ov1mg);
+      const su2double p     = -rho*V4Inv;
+      const su2double rE    = -p*ov1mg + rho*ek;
+			const su2double H     =  rE/rho - V4Inv;
+			const su2double a2    = -GamConstant*V4Inv;
+			const su2double a     =  SQRT( a2 );
+			const su2double rhoa  =  rho*a;
+			const su2double ovra  =  one/rhoa;
+			const su2double ova2  =  one/a2;
+			const su2double rova  =  rho/a;
+			const su2double rhou  =  rho*u;
+			const su2double rhov  =  rho*v;
+			const su2double rhow  =  rho*w;
+
+			// Assemble non-zero entries of the Jacobian of transformation: entropy-to-primitive.
+		  // Note, the commented indices start from index 1, not 0 -- similar to MATLAB.
+
+			// The 1st row.
+		  const su2double J_11 = rho;      // dQdV(1,1) 
+		  const su2double J_12 = rhou;     // dQdV(1,2)
+		  const su2double J_13 = rhov;     // dQdV(1,3)
+		  const su2double J_14 = rhow;     // dQdV(1,4)
+		  const su2double J_15 = rE;       // dQdV(1,5)
+
+		  // Then 2nd row.
+		  const su2double J_22 = -V4Inv;   // dQdV(2,2)
+		  const su2double J_25 = -V4Inv*u; // dQdV(2,5)
+
+		  // The 3rd row.
+		  const su2double J_33 = -V4Inv;   // dQdV(3,3)
+		  const su2double J_35 = -V4Inv*v; // dQdV(3,5)
+
+		  // The 4th row.
+		  const su2double J_44 = -V4Inv;   // dQdV(4,4)
+		  const su2double J_45 = -V4Inv*w; // dQdV(4,5)
+
+		  // The 5th row.
+		  const su2double J_51 = p;        // dQdV(5,1)
+		  const su2double J_52 = p*u;      // dQdV(5,2)
+		  const su2double J_53 = p*v;      // dQdV(5,3)
+		  const su2double J_54 = p*w;      // dQdV(5,4)
+		  const su2double J_55 = p*H;      // dQdV(5,5)
+
+			// Compute the gradient of the primitive variables in x-direction.
+      const su2double drdx  = J_11*dVarDx[0][l] + J_12*dVarDx[1][l] + J_13*dVarDx[2][l] + J_14*dVarDx[3][l] + J_15*dVarDx[4][l];
+			const su2double dudx  =                     J_22*dVarDx[1][l]                                         + J_25*dVarDx[4][l]; 
+			const su2double dvdx  =                                         J_33*dVarDx[2][l]                     + J_35*dVarDx[4][l]; 
+			const su2double dwdx  =                                                             J_44*dVarDx[3][l] + J_45*dVarDx[4][l]; 
+			const su2double dpdx  = J_51*dVarDx[0][l] + J_52*dVarDx[1][l] + J_53*dVarDx[2][l] + J_54*dVarDx[3][l] + J_55*dVarDx[4][l]; 
+
+			// Compute the gradient of the primitive variables in y-direction.
+      const su2double drdy  = J_11*dVarDy[0][l] + J_12*dVarDy[1][l] + J_13*dVarDy[2][l] + J_14*dVarDy[3][l] + J_15*dVarDy[4][l];
+			const su2double dudy  =                     J_22*dVarDy[1][l]                                         + J_25*dVarDy[4][l]; 
+			const su2double dvdy  =                                         J_33*dVarDy[2][l]                     + J_35*dVarDy[4][l]; 
+			const su2double dwdy  =                                                             J_44*dVarDy[3][l] + J_45*dVarDy[4][l]; 
+			const su2double dpdy  = J_51*dVarDy[0][l] + J_52*dVarDy[1][l] + J_53*dVarDy[2][l] + J_54*dVarDy[3][l] + J_55*dVarDy[4][l]; 
+
+			// Compute the gradient of the primitive variables in z-direction.
+      const su2double drdz  = J_11*dVarDz[0][l] + J_12*dVarDz[1][l] + J_13*dVarDz[2][l] + J_14*dVarDz[3][l] + J_15*dVarDz[4][l];
+			const su2double dudz  =                     J_22*dVarDz[1][l]                                         + J_25*dVarDz[4][l]; 
+			const su2double dvdz  =                                         J_33*dVarDz[2][l]                     + J_35*dVarDz[4][l]; 
+			const su2double dwdz  =                                                             J_44*dVarDz[3][l] + J_45*dVarDz[4][l]; 
+			const su2double dpdz  = J_51*dVarDz[0][l] + J_52*dVarDz[1][l] + J_53*dVarDz[2][l] + J_54*dVarDz[3][l] + J_55*dVarDz[4][l]; 
+
+
+			// Compute the modified eigenvalues in x-direction.
+			su2double lmbx1 = u - a;
+			su2double lmbx2 = u;
+			su2double lmbx3 = u + a;
+
+			// Compute the modified eigenvalues in y-direction.
+			su2double lmby1 = v - a;
+			su2double lmby2 = v;
+			su2double lmby3 = v + a;
+
+			// Compute the modified eigenvalues in z-direction.
+			su2double lmbz1 = w - a;
+			su2double lmbz2 = w;
+			su2double lmbz3 = w + a;
+
+			// Eliminate any outgoing eigenvalues in the x-direction.
+			if( nx*lmbx1 > zero ) lmbx1 = zero;
+			if( nx*lmbx2 > zero ) lmbx2 = zero;
+			if( nx*lmbx3 > zero ) lmbx3 = zero;
+		
+			// Eliminate any outgoing eigenvalues in the y-direction.
+			if( ny*lmby1 > zero ) lmby1 = zero;
+			if( ny*lmby2 > zero ) lmby2 = zero;
+			if( ny*lmby3 > zero ) lmby3 = zero;
+
+			// Eliminate any outgoing eigenvalues in the z-direction.
+			if( nz*lmbz1 > zero ) lmbz1 = zero;
+			if( nz*lmbz2 > zero ) lmbz2 = zero;
+			if( nz*lmbz3 > zero ) lmbz3 = zero;
+	
+			// Compute the total wave amplitude in the x-direction.
+			const su2double Lx1 = half*lmbx1*( ovra*dpdx -      dudx );
+			const su2double Lx2 =      lmbx2*(      drdx - ova2*dpdx );
+			const su2double Lx3 =      lmbx2*(      dwdx             );
+			const su2double Lx4 =      lmbx2*(     -dvdx             );
+			const su2double Lx5 = half*lmbx3*( ovra*dpdx +      dudx );
+
+			// Compute the total wave amplitude in the y-direction.
+			const su2double Ly1 = half*lmby1*( ovra*dpdy -      dvdy );
+			const su2double Ly2 =      lmby2*(     -dwdy             );
+			const su2double Ly3 =      lmby2*(      drdy - ova2*dpdy );
+			const su2double Ly4 =      lmby2*(      dudy             );
+			const su2double Ly5 = half*lmby3*( ovra*dpdy +      dvdy );
+
+			// Compute the total wave amplitude in the z-direction.
+			const su2double Lz1 = half*lmbz1*( ovra*dpdz -      dwdz );
+			const su2double Lz2 =      lmbz2*(      dvdz             );
+			const su2double Lz3 =      lmbz2*(     -dudz             );
+			const su2double Lz4 =      lmbz2*(      drdz - ova2*dpdz );
+			const su2double Lz5 = half*lmbz3*( ovra*dpdz +      dwdz );
+
+			// Some abbreviations involving the acoustic wave amplitides.
+			const su2double Lx5pLx1 = Lx5 + Lx1;
+			const su2double Ly5pLy1 = Ly5 + Ly1;
+			const su2double Lz5pLz1 = Lz5 + Lz1;
+
+			// Compute the P = S*L matrix in the x-direction, i.e. A*dQdx.
+			const su2double Px1 = rova*( Lx5pLx1   ) + Lx2;
+			const su2double Px2 =      ( Lx5 - Lx1 )      ;
+			const su2double Px3 =                    - Lx4;
+			const su2double Px4 =                      Lx3;
+			const su2double Px5 = rhoa*( Lx5pLx1   )      ;
+
+			// Compute the P = S*L matrix in the y-direction, i.e. B*dQdy.
+			const su2double Py1 = rova*( Ly5pLy1   ) + Ly3;
+			const su2double Py2 =                      Ly4;
+			const su2double Py3 =      ( Ly5 - Ly1 )      ;
+			const su2double Py4 =                    - Ly2;
+			const su2double Py5 = rhoa*( Ly5pLy1   )      ;
+
+			// Compute the P = S*L matrix in the z-direction, i.e. C*dQdz.
+			const su2double Pz1 = rova*( Lz5pLz1   ) + Lz4;
+			const su2double Pz2 =                    - Lz3;
+			const su2double Pz3 =                      Lz2;
+			const su2double Pz4 =      ( Lz5 - Lz1 )      ;
+			const su2double Pz5 = rhoa*( Lz5pLz1   )      ;
+
+			 
+			// Construct the weighted fluxes from the wave amplitudes in the x-direction.
+			bufVar[0][l] = wx*(    Px1                                              );
+			bufVar[1][l] = wx*(  u*Px1 +  rho*Px2                                   );
+			bufVar[2][l] = wx*(  v*Px1            +  rho*Px3                        );
+			bufVar[3][l] = wx*(  w*Px1                       +  rho*Px4             );
+			bufVar[4][l] = wx*( ek*Px1 + rhou*Px2 + rhov*Px3 + rhow*Px4 + ovgm1*Px5 );
+
+			// Construct the weighted fluxes from the wave amplitudes in the y-direction.
+			bufVar[0][l] += wy*(    Py1                                              );
+			bufVar[1][l] += wy*(  u*Py1 +  rho*Py2                                   );
+			bufVar[2][l] += wy*(  v*Py1            +  rho*Py3                        );
+			bufVar[3][l] += wy*(  w*Py1                       +  rho*Py4             );
+			bufVar[4][l] += wy*( ek*Py1 + rhou*Py2 + rhov*Py3 + rhow*Py4 + ovgm1*Py5 );
+
+			// Construct the weighted fluxes from the wave amplitudes in the z-direction.
+			bufVar[0][l] += wz*(    Pz1                                              );
+			bufVar[1][l] += wz*(  u*Pz1 +  rho*Pz2                                   );
+			bufVar[2][l] += wz*(  v*Pz1            +  rho*Pz3                        );
+			bufVar[3][l] += wz*(  w*Pz1                       +  rho*Pz4             );
+			bufVar[4][l] += wz*( ek*Pz1 + rhou*Pz2 + rhov*Pz3 + rhow*Pz4 + ovgm1*Pz5 );
+		}
+
+    // Add the matching source terms to the residual equations. 
+		TensorProductVolumeResidual(nInt1D, nVar, nDOFs1D,
+                                standardHex->mLegendreInt1DTranspose,
+                                standardHex->mLegendreInt1DTranspose,
+                                standardHex->mLegendreInt1DTranspose,
+                                bufVar, mRes.data());
+	}
+
+
+  //--------------------------------------------------------------------------
+  // Step 3: Convert the working variables and its gradients to primitive
   //         variables and gradients of velocity and internal energy.
   //--------------------------------------------------------------------------
 
@@ -3977,7 +4266,7 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
   }
 
   //--------------------------------------------------------------------------
-  // Step 3: Compute the eddy viscosity, if needed.
+  // Step 4: Compute the eddy viscosity, if needed.
   //--------------------------------------------------------------------------
 
   if(inputParam->mSGSModelType != NO_SGS_MODEL)
@@ -4000,7 +4289,7 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
   }
 
   //--------------------------------------------------------------------------
-  // Step 4: Update the monitoring data, if needed.
+  // Step 5: Update the monitoring data, if needed.
   //--------------------------------------------------------------------------
 
   if( ComputeMonitoringData )
@@ -4023,7 +4312,7 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
   }
 
   //--------------------------------------------------------------------------
-  // Step 5: Compute the sum of the inviscid and viscous fluxes in the three
+  // Step 6: Compute the sum of the inviscid and viscous fluxes in the three
   //         index directions in the integration points.
   //--------------------------------------------------------------------------
 
@@ -4127,15 +4416,8 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
   }
 
   //--------------------------------------------------------------------------
-  // Step 6: Compute the contribution of the volume integral to the residual.
-  //         This also serves as an initialization of the residual.
+  // Step 7: Compute the contribution of the volume integral to the residual.
   //--------------------------------------------------------------------------
-
-  // Initialize the residual to zero.
-  for(int l=0; l<nVar; ++l)
-#pragma omp simd
-    for(int m=0; m<nDOFsPad; ++m)
-      mRes[l][m] = zero;
 
   // Call the function TensorProductVolumeResidual three times to accumulate
   // the residual contributions from the fluxes in the three directions.
@@ -4161,7 +4443,53 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
                               dVarDz, mRes.data());
 
   //--------------------------------------------------------------------------
-  // Step 7: Compute the contribution of the body force term to the residual.
+  // Step 8: Compute the contribution of the sponge layer damping terms to 
+	// the residual.
+  //--------------------------------------------------------------------------
+
+  // Test if a sponge damping term is specified.
+  if( mSpongeLayerElement )
+  {
+    // Loop over the integration points.
+#pragma omp simd
+    for(int l=0; l<nIntPad; ++l)
+    {
+      // Determine the multiplication weight for the source terms. This weight
+      // is the weight of this integration point multiplied by the Jacobian.
+      // The plus sign is present, because both the damping terms are the 
+			// residual of the Navier-Stokes equations are defined on the LHS.
+      const su2double weight = mVolMetricInt[0][l]*standardHex->mIntWeights[l];
+
+			// Extract the sum of the damping functions acting on this point.
+			const su2double sigma  = weight*( mDampingFunction[0][l] 
+														 +          mDampingFunction[1][l]
+														 +          mDampingFunction[2][l] );
+
+			// Extract the difference between the current solution and damping state.
+			const su2double dr  = Var[0][l]           - mDampingState[0][l];
+			const su2double dru = Var[0][l]*Var[1][l] - mDampingState[1][l];
+			const su2double drv = Var[0][l]*Var[2][l] - mDampingState[2][l];
+			const su2double drw = Var[0][l]*Var[3][l] - mDampingState[3][l];
+			const su2double drE = Var[4][l]           - mDampingState[4][l];
+
+			// Compute the damping source terms.
+			bufVar[0][l] = sigma*dr;
+			bufVar[1][l] = sigma*dru;
+			bufVar[2][l] = sigma*drv;
+			bufVar[3][l] = sigma*drw;
+			bufVar[4][l] = sigma*drE;
+		}
+
+    // Add the damping source terms to the residual equations. 
+		TensorProductVolumeResidual(nInt1D, nVar, nDOFs1D,
+                                standardHex->mLegendreInt1DTranspose,
+                                standardHex->mLegendreInt1DTranspose,
+                                standardHex->mLegendreInt1DTranspose,
+                                bufVar, mRes.data());
+	}
+
+  //--------------------------------------------------------------------------
+  // Step 9: Compute the contribution of the body force term to the residual.
   //--------------------------------------------------------------------------
 
   // Test if a body force was specified.
@@ -4204,3 +4532,6 @@ void ElementClass::VolumeResidual(const InputParamClass      *inputParam,
                                 &Var[0], &mRes[1]);
   }
 }
+
+
+

@@ -1018,13 +1018,13 @@ void SolverClass::ComputeMetricTerms(void)
 //------------------------------------------------------------------------------
 
 // Function, which determines the precision of the restart file.
-short SolverClass::DeterminePrecisionRestartFile(void)
+short SolverClass::DeterminePrecisionRestartFile(const char *filename)
 {
   // Open the restart file for binary reading.
-  FILE *restartFile = fopen(mInputParam->mRestartFile.c_str(), "rb");
+  FILE *restartFile = fopen(filename, "rb");
   if( !restartFile )
     Terminate("SolverClass::DeterminePrecisionRestartFile", __FILE__, __LINE__,
-              "Restart file could not be opened for binary reading");
+              std::string(filename) + " could not be opened for binary reading");
 
   // Read the first 5 integer variables of the solution file, check if it
   // is in the correct format and determine the number of variables and
@@ -1208,7 +1208,6 @@ void SolverClass::DetermineVisualizationData(std::vector<std::string> &visNames,
           // Store the density in the buffer.
           for(int l=0; l<nDOFs; ++l)
             buf[l] = (float) primVar[0][l];
-
         }
         else if(visNames[visVar] == "Momentum_x")
         {
@@ -2481,6 +2480,10 @@ void SolverClass::InitNSCBC(void)
 		// all processes.
 		MPI_Allreduce(locBuf, mSurfAreaBoundary, 6, MPI_SU2DOUBLE, MPI_SUM, MPI_COMM_WORLD); 
 	}
+#else 
+	// This is a single rank simulation, thus use the local area as the entire surface area.
+	for(unsigned short iBoundary=0; iBoundary<6; iBoundary++)
+		mSurfAreaBoundary[iBoundary] = LocalSurfAreaBoundary[iBoundary];
 #endif
 
 	// Assign respective tuning parameters.
@@ -2556,6 +2559,10 @@ void SolverClass::AverageDataNSCBC(void)
 		// all processes.
 		MPI_Allreduce(locBuf, AverageBoundaryMach, 6, MPI_SU2DOUBLE, MPI_SUM, MPI_COMM_WORLD); 
 	}
+#else 
+	// This is a single rank simulation, thus use the local Mach as the total Mach.
+	for(unsigned short iBoundary=0; iBoundary<6; iBoundary++)
+		AverageBoundaryMach[iBoundary] = LocalMachWeighted[iBoundary];
 #endif
 
 	// Normalize by the true surface area per boundary face to obtain the actual average.
@@ -3044,7 +3051,7 @@ void SolverClass::ReadRestartSolution(void)
   // Determine the precision of the restart file.
   short precisionRestartFile = 0;
   if(rank == 0)
-    precisionRestartFile = DeterminePrecisionRestartFile();
+    precisionRestartFile = DeterminePrecisionRestartFile(mInputParam->mRestartFile.c_str());
 
 #ifdef HAVE_MPI
   // Broadcast the precision to all ranks.

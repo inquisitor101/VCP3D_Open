@@ -1,0 +1,7 @@
+#!/bin/bash
+
+rm anim/*.vtk
+rm proc/*.vtk
+rm data/*
+rm zone/*.dat
+rm logs/*.log

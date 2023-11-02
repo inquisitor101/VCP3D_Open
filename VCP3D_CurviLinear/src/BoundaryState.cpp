@@ -1320,6 +1320,9 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 	// Abbreviation for the nodal Lagrange coefficient used in the PC-reconstruction.
 	const su2double dell = mDerCoefficient;
 
+	// Decide the sign of the (coupled-)transverse acoustic term, based on the incoming index: phi.
+	const su2double sign = (iPhi == 0) ? -one : one; 
+
 	// Select type of averaging used in the Mach number calculations.
 	const su2double Mach  = ( inputParam->mNSCBC_Outlet_AverageLocal ) ? mMachAverageElement : mMachAverageBoundary; 
 	// Compute the square of the boundary-averaged Mach number.
@@ -1397,10 +1400,8 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 #pragma omp simd
 	for(int l=0; l<nInt; ++l)
 	{
-		// Initialize the wave amplitudes vector.
-		su2double LL[5] = {zero, zero, zero, zero, zero}; // normal waves.
-		su2double LT[5] = {zero, zero, zero, zero, zero}; // coupled   transverse.
-		su2double TT[5] = {zero, zero, zero, zero, zero}; // uncoupled transverse.
+		// Initialize the normal wave amplitude vector.
+		su2double LL[5] = {zero, zero, zero, zero, zero}; 
 
 		// Extract prescribed pressure.
 		const su2double pInf = prescribedData[0][l];
@@ -1432,6 +1433,12 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 		const su2double dvdr   = dSolDrR[2][l];
 		const su2double dwdr   = dSolDrR[3][l];
 		const su2double dpdr   = dSolDrR[4][l];
+
+		// Extract the derivative of some of the transverse quantities needed in the formulation.
+		const su2double duds = dSolDsR[1][l], dudt = dSolDtR[1][l];
+		const su2double dvds = dSolDsR[2][l], dvdt = dSolDtR[2][l];
+		const su2double dwds = dSolDsR[3][l], dwdt = dSolDtR[3][l];
+		const su2double dpds = dSolDsR[4][l], dpdt = dSolDtR[4][l];
 
 		// Inverse of rho.
 		const su2double ovrho  = one/rho;
@@ -1483,19 +1490,13 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 		const su2double dw3dr = rn[0]*dvdr - rn[1]*dudr;
 
 		// The derivative of the rr-projected velocity in the normal rr-direction.
-		const su2double durdr = rn[0]*dSolDrR[1][l] 
-			                    + rn[1]*dSolDrR[2][l] 
-													+ rn[2]*dSolDrR[3][l]; 
+		const su2double durdr = rn[0]*dudr + rn[1]*dvdr + rn[2]*dwdr; 
 		
 		// The derivative of the rr-projected velocity in the transverse ss-direction.
-		const su2double durds = rn[0]*dSolDsR[1][l] 
-			                    + rn[1]*dSolDsR[2][l] 
-													+ rn[2]*dSolDsR[3][l]; 
+		const su2double durds = rn[0]*duds + rn[1]*dvds + rn[2]*dwds; 
 		
 		// The derivative of the rr-projected velocity in the transverse tt-direction.
-		const su2double durdt = rn[0]*dSolDtR[1][l] 
-			                    + rn[1]*dSolDtR[2][l] 
-													+ rn[2]*dSolDtR[3][l];
+		const su2double durdt = rn[0]*dudt + rn[1]*dvdt + rn[2]*dwdt;
 
 		// Assemble the internal-based (-)normal wave amplitude. 
 		// Note, the entropy/vorticity wave amplitudes intentionally
@@ -1507,21 +1508,15 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 		LL[4] = half*lmb3*( ovrhoa*dpdr + durdr );
 
 		// Assemble the coupled-transverse wave amplitudes for the acoustic waves only.
-		// The acoustic wave relative to (u-a).
-		LT[0] = half*ovrhoa*(us - ars)*dSolDsR[4][l] - half*us*durds
-			    + half*ovrhoa*(ut - art)*dSolDtR[4][l] - half*ut*durdt;
-		// The acoustic wave relative to (u+a).
-		LT[4] = half*ovrhoa*(us + ars)*dSolDsR[4][l] + half*us*durds
-			    + half*ovrhoa*(ut + art)*dSolDtR[4][l] + half*ut*durdt;
+		const su2double LT = half*ovrhoa*(us + sign*ars)*dpds + sign*half*us*durds
+			                 + half*ovrhoa*(ut + sign*art)*dpdt + sign*half*ut*durdt;
 		
 		// Assemble the uncoupled-transverse wave amplitudes for the acoustic waves only.
-		TT[0] = -half*a*( ss[0]*dSolDsR[1][l] + ss[1]*dSolDsR[2][l] + ss[2]*dSolDsR[3][l]
-				  +           tt[0]*dSolDtR[1][l] + tt[1]*dSolDtR[2][l] + tt[2]*dSolDtR[3][l] );
-		// Both uncoupled-transverse acoustic wave amplitudes share the same expression.
-		TT[4] = TT[0];
+		const su2double TT = -half*a*( ss[0]*duds + ss[1]*dvds + ss[2]*dwds
+			                 +           tt[0]*dudt + tt[1]*dvdt + tt[2]*dwdt );
 
 		// Correct for the incoming waves. Note, Lt - TT = transverse terms.
-		LL[iPhi] = kk*ovrho*(p - pInf) - cbl*LT[iPhi] + cbt*TT[iPhi]; 
+		LL[iPhi] = kk*ovrho*magrr*(p - pInf) - cbl*LT + cbt*TT; 
 
 		// Reconstruct the boundary-conforming normal derivative of the
 		// primitive variables. Note, these are stored in dSolDrR.
@@ -1576,28 +1571,28 @@ void BCOutflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamC
 
 
 //------------------------------------------------------------------------------
-// Characteristic BC: Inlet 
+// Characteristic BC: Inlet (static) 
 //------------------------------------------------------------------------------
 
 // Function, which computes the boundary state (the right state) from the
 // given left state and the prescribed boundary data.
-void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamClass      *inputParam,
-		                                                          const StandardElementClass *standardHex,
-                                                              const int                   nInt,
-                                                              su2double                 **solL,
-                                                              su2double                 **dSolDxL,
-                                                              su2double                 **dSolDyL,
-                                                              su2double                 **dSolDzL,
-                                                              const su2double             factNorm,
-                                                              su2double                 **metricL,
-                                                              su2double                 **prescribedData,
-                                                              su2double                 **solR,
-                                                              su2double                 **dSolDxR,
-                                                              su2double                 **dSolDyR,
-                                                              su2double                 **dSolDzR,
-                                                              bool                       &heatFluxPrescribed,
-                                                              su2double                 *&prescribedWallData,
-                                                              su2double                  &wallPerm)
+void BCInflowStaticCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamClass      *inputParam,
+		                                                                const StandardElementClass *standardHex,
+                                                                    const int                   nInt,
+                                                                    su2double                 **solL,
+                                                                    su2double                 **dSolDxL,
+                                                                    su2double                 **dSolDyL,
+                                                                    su2double                 **dSolDzL,
+                                                                    const su2double             factNorm,
+                                                                    su2double                 **metricL,
+                                                                    su2double                 **prescribedData,
+                                                                    su2double                 **solR,
+                                                                    su2double                 **dSolDxR,
+                                                                    su2double                 **dSolDyR,
+                                                                    su2double                 **dSolDzR,
+                                                                    bool                       &heatFluxPrescribed,
+                                                                    su2double                 *&prescribedWallData,
+                                                                    su2double                  &wallPerm)
 {
 	// Abbreviation for the incoming wave amplitude index.
 	const int iPhi       = mIndexPhi;
@@ -1605,6 +1600,10 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 	const su2double dell = mDerCoefficient;
 	// Deduce whether the sign used in the incoming acoustic wave coefficient.
 	const su2double sign = ( factNorm > zero ) ? -one : one;
+
+	// Check whether to couple the incoming and outgoing acoustic waves 
+	// in the boundary imposition.
+	const bool IsCoupled = inputParam->mNSCBC_Inlet_incoming;
 
 	// Select the Mach number based on the global boundary always.
 	const su2double Mach  = mMachAverageBoundary; 
@@ -1683,10 +1682,9 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 
 		// Extract the metrics according to the boundary-normal convention. Note, 
 		// according to Lodato et al. these are: 
-		// [rr]: \nu, [ss]: \tau, [tt]: \kappa.
+		// [rr]: \nu, [ss]: \tau, [tt]: \kappa. 
+		// Note, ss and tt are not needed for an inlet.
 		const su2double rr[3] = { metricL[I0][l], metricL[I1][l], metricL[I2][l] };
-		const su2double ss[3] = { metricL[J0][l], metricL[J1][l], metricL[J2][l] };
-		const su2double tt[3] = { metricL[K0][l], metricL[K1][l], metricL[K2][l] };
 
 		// Magnitude of the normal metric vector.
 		const su2double magrr   = SQRT( rr[0]*rr[0] + rr[1]*rr[1] + rr[2]*rr[2] );
@@ -1723,18 +1721,11 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 		const su2double rhova  = rho/a;
 
 		// Projected the velocity vector.
-		const su2double ur = u*rr[0] + v*rr[1] + w*rr[2]; // w.r.t. rr-direction.
-		const su2double us = u*ss[0] + v*ss[1] + w*ss[2]; // w.r.t. ss-direction.
-		const su2double ut = u*tt[0] + v*tt[1] + w*tt[2]; // w.r.t. tt-direction.
+		const su2double ur  = u*rr[0] + v*rr[1] + w*rr[2]; // w.r.t. rr-direction.
 
 		// Projected speed of sound w.r.t. rr-direction.
 		const su2double arr = a*magrr;
 
-		// Projected speed of sound w.r.t. the coupled rs-directions.
-		const su2double ars = a*( rn[0]*ss[0] + rn[1]*ss[1] + rn[2]*ss[2] );
-		// Projected speed of sound w.r.t. the coupled rt-directions.
-		const su2double art = a*( rn[0]*tt[0] + rn[1]*tt[1] + rn[2]*tt[2] );
-		
 		// Define the projected eigenvalues: acoustic and convective. 
 		const su2double lmb1 = ur - arr;
 		const su2double lmb2 = ur;
@@ -1762,21 +1753,16 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 			                    + rn[1]*dSolDrR[2][l] 
 													+ rn[2]*dSolDrR[3][l]; 
 		
-		// The derivative of the rr-projected velocity in the transverse ss-direction.
-		const su2double durds = rn[0]*dSolDsR[1][l] 
-			                    + rn[1]*dSolDsR[2][l] 
-													+ rn[2]*dSolDsR[3][l]; 
-		
-		// The derivative of the rr-projected velocity in the transverse tt-direction.
-		const su2double durdt = rn[0]*dSolDtR[1][l] 
-			                    + rn[1]*dSolDtR[2][l] 
-													+ rn[2]*dSolDtR[3][l];
 
 		// Assemble the internal-based (-)normal wave amplitude. 
 		// Note, the entropy/vorticity wave amplitudes need not be constructed
 		// since they will always be overwritten by the external part.
-		LL[0] = half*lmb1*( ovrhoa*dpdr - durdr );
-		LL[4] = half*lmb3*( ovrhoa*dpdr + durdr );
+		// Note, if there is no coupling specified, then these are already zero.
+		if( IsCoupled )
+		{
+			LL[0] = half*lmb1*( ovrhoa*dpdr - durdr );
+			LL[4] = half*lmb3*( ovrhoa*dpdr + durdr );
+		}
 
 		// Difference between the internal and external/reference data.
 		const su2double drho = rho - rhoInf;
@@ -1790,11 +1776,12 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 		const su2double kaol = ku*a*ovlmb2;
 
 		// Correct for the incoming acoustic   wave.
-		LL[iPhi] = ka*a*( rn[0]*du + rn[1]*dv + rn[2]*dw   ); 
+		LL[iPhi] = ka*a*( rr[0]*du + rr[1]*dv + rr[2]*dw   ); 
 		// Correct for the incoming convective waves.
-		LL[1]    = kaol*( rn[2]*dv - rn[1]*dw - rn[0]*drho );
-		LL[2]    = kaol*( rn[0]*dw - rn[2]*du - rn[1]*drho );
-		LL[3]    = kaol*( rn[1]*du - rn[0]*dv - rn[2]*drho );
+		LL[1]    = kaol*( rr[2]*dv - rr[1]*dw + rr[0]*drho );
+		LL[2]    = kaol*( rr[0]*dw - rr[2]*du + rr[1]*drho );
+		LL[3]    = kaol*( rr[1]*du - rr[0]*dv + rr[2]*drho );
+
 
 
 		// Reconstruct the boundary-conforming normal derivative of the
@@ -1842,6 +1829,410 @@ void BCInflowCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamCl
 		dSolDsR[3][l] = dSolDrR[3][l] - ( dwdr   -   w*dell ); // w-velocity.
 		dSolDsR[4][l] = dSolDrR[4][l] - ( dpdr   -   p*dell ); // pressure.
 	}
+
+	// Approximate the primitive variable state from the boundary-conforming
+	// normal wave amplitude via a PC-approach. Then, convert the primitive 
+	// state into the entropy state which are the working variables.
+	ReconstructBoundaryStateAndGradient(standardHex, factNorm, solR, dSolDrR, dSolDsR, dSolDtR);
+}
+
+
+
+
+//------------------------------------------------------------------------------
+// Characteristic BC: Inlet (total) 
+//------------------------------------------------------------------------------
+
+// Function, which computes the boundary state (the right state) from the
+// given left state and the prescribed boundary data.
+void BCInflowTotalCharacteristicSubfaceClass::ComputeBoundaryState(const InputParamClass      *inputParam,
+		                                                               const StandardElementClass *standardHex,
+                                                                   const int                   nInt,
+                                                                   su2double                 **solL,
+                                                                   su2double                 **dSolDxL,
+                                                                   su2double                 **dSolDyL,
+                                                                   su2double                 **dSolDzL,
+                                                                   const su2double             factNorm,
+                                                                   su2double                 **metricL,
+                                                                   su2double                 **prescribedData,
+                                                                   su2double                 **solR,
+                                                                   su2double                 **dSolDxR,
+                                                                   su2double                 **dSolDyR,
+                                                                   su2double                 **dSolDzR,
+                                                                   bool                       &heatFluxPrescribed,
+                                                                   su2double                 *&prescribedWallData,
+                                                                   su2double                  &wallPerm)
+{
+	// Abbreviations involving gamma.
+	const su2double gm1    = GamConstant - one;
+  const su2double ovgm1  = one/gm1;
+	const su2double govgm1 = GamConstant*ovgm1;
+	const su2double ovrg   = one/RGas;
+	const su2double ovcp   = one/Cp;
+
+	// Abbreviation for the incoming wave amplitude index.
+	const int iPhi       = mIndexPhi;
+	// Abbreviation for the outgoing wave amplitude index.
+	const int iPsi       = mIndexPsi;
+	// Abbreviation for the nodal Lagrange coefficient used in the PC-reconstruction.
+	const su2double dell = mDerCoefficient;
+
+	// Check whether to couple the incoming and outgoing acoustic waves 
+	// in the boundary imposition.
+	const bool IsCoupled = inputParam->mNSCBC_Inlet_incoming;
+	
+	// Compute the normal relaxation coefficient.
+	const su2double kk   = -mSigma/mLengthScale;
+
+	// In the following, the directions (r, s, t) correspond to:
+	//  r: is the normal     (xi  -)direction,
+	//  s: first  transverse (eta -)direction,
+	//  t: second transverse (zeta-)direction.
+	//  ... these depend on the normal (r-)direction, specifically:
+	//      r = x, then: s = y, t = z (original framework),
+	//      r = y, then: s = x, t = z (rotation around  t),
+	//      r = z, then: s = y, t = x (rotation around  s).
+
+	// Gradients w.r.t. boundary orientation (internal/known   left state).
+	su2double **dSolDrL, **dSolDsL, **dSolDtL;
+	// Gradients w.r.t. boundary orientation (external/unknown right state).
+	su2double **dSolDrR, **dSolDsR, **dSolDtR;
+
+	// Assign the gradient and metric directions according to the normal 
+	// convention on this boundary face.
+	for(int i=0; i<3; i++)
+	{
+		// Temporary gradient pointers.
+		su2double **tmpL = NULL, **tmpR = NULL;
+		// Step 1: Select old boundary orientation.
+    switch( mIndexGradient[i] )
+		{
+			case(0): { tmpL = dSolDxL; tmpR = dSolDxR; break; }
+			case(1): { tmpL = dSolDyL; tmpR = dSolDyR; break; }
+			case(2): { tmpL = dSolDzL; tmpR = dSolDzR; break; }
+			default: break;
+		}
+
+		// Step 2: Map the old orientation to the new boundary-normal orientation.
+		switch( i )
+		{
+			case(0): { dSolDrL = tmpL; dSolDrR = tmpR; break; }
+			case(1): { dSolDsL = tmpL; dSolDsR = tmpR; break; }
+			case(2): { dSolDtL = tmpL; dSolDtR = tmpR; break; }
+			default: break;
+		}
+	}
+
+	// Starting metric indices on this face for the normal, and the two 
+	// transverse directions, respectively.
+	const int I0 = mIndexMetric[0], I1 = I0+1, I2 = I1+1; // Normal
+	const int J0 = mIndexMetric[1], J1 = J0+1, J2 = J1+1; // Transverse first
+	const int K0 = mIndexMetric[2], K1 = K0+1, K2 = K1+1; // Transverse second
+
+	// Convert the entropy variables and their entropy-based gradient 
+	// into primitive variables and primitive-based gradient. These 
+	// primitive-based data overwrite the right-state variables for now.
+  ConvertEntropyToPrimitive(nInt,
+			                      solL, dSolDrL, dSolDsL, dSolDtL,
+			                      solR, dSolDrR, dSolDsR, dSolDtR);
+
+	// Loop over the number of integration points.
+//#pragma omp simd
+	for(int l=0; l<nInt; ++l)
+	{
+		// Initialize the normal wave amplitudes vector.
+		su2double LL[5] = {zero, zero, zero, zero, zero};
+
+		// Extract prescribed total conditions: Pt, Tt, udir, vdir, wdir.
+		const su2double PtInf = prescribedData[0][l];
+		const su2double TtInf = prescribedData[1][l];
+		const su2double uiInf = prescribedData[2][l];
+		const su2double vjInf = prescribedData[3][l];
+		const su2double wkInf = prescribedData[4][l];
+
+		// NOTE, this work always assumes that the boundary is perpendicular to the x-direction.
+		// Thus, the corresponding inflow direction angles are: cos(theta), cos(phi). 
+		// More specifically, 
+		// cos(theta): angle between y-axis and ||u||.
+		// cos( phi ): angle between z-axis and ||u||.
+		// ... Note, these should be normalized by ||u||, however the inflow angle is already 
+		// normalized, thus it id redundant to do so now -- i.e. ||uInf|| = 1.
+		// These direction angles are computed as follows:
+		const su2double ZtInf = vjInf; // cos(theta).
+		const su2double ZpInf = wkInf; // cos( phi ).
+
+
+		// Extract the metrics according to the boundary-normal convention. Note, 
+		// according to Lodato et al. these are: 
+		// [rr]: \nu, [ss]: \tau, [tt]: \kappa.
+		// Note, ss and tt are not needed for an inlet.
+		const su2double rr[3] = { metricL[I0][l], metricL[I1][l], metricL[I2][l] };
+
+		// Magnitude of the normal metric vector.
+		const su2double magrr   = SQRT( rr[0]*rr[0] + rr[1]*rr[1] + rr[2]*rr[2] );
+		// Inverse of the magnitude of the normal metric vector.
+		const su2double ovmagrr = one/magrr;
+		// Normalize the metric in the normal (rr-)direction. This is \bar{nu} in Lodato et al.
+		const su2double rn[3]   = { rr[0]*ovmagrr, rr[1]*ovmagrr, rr[2]*ovmagrr };
+
+		// Extract the primitive variables.
+		const su2double rho    = solR[0][l];
+		const su2double u      = solR[1][l];
+		const su2double v      = solR[2][l];
+		const su2double w      = solR[3][l];
+		const su2double p      = solR[4][l];
+
+		// Extract the derivative of the normal derivative, needed in forming the B (PC-)matrix.
+		const su2double drhodr = dSolDrR[0][l];
+		const su2double dudr   = dSolDrR[1][l];
+		const su2double dvdr   = dSolDrR[2][l];
+		const su2double dwdr   = dSolDrR[3][l];
+		const su2double dpdr   = dSolDrR[4][l];
+
+		// Inverse of rho.
+		const su2double ovrho  = one/rho;
+
+		// Compute the speed of sound and its square.
+		const su2double a2     = GamConstant*p*ovrho;
+		const su2double a      = SQRT(a2);
+
+		// Compute some abbreviations required.
+		const su2double ova2   = one/a2;
+		const su2double ova    = one/a;
+		const su2double rhoa   = rho*a;
+		const su2double ovrhoa = one/rhoa;
+		const su2double rhova  = rho/a;
+
+		// Compute the temperature.
+		const su2double T  = p*ovrho*ovrg; 
+
+		// Projected the velocity vector, w.r.t the normalized rr-direction.
+		const su2double ur = u*rn[0] + v*rn[1] + w*rn[2]; 
+
+		// Some abbreviations for vorticity components.
+		const su2double w1 = rn[1]*w - rn[2]*v;
+		const su2double w2 = rn[2]*u - rn[0]*w;
+		const su2double w3 = rn[0]*v - rn[1]*u;
+
+		// Define the projected eigenvalues: acoustic and convective. 
+		const su2double lmb1 = ur - a;
+		const su2double lmb2 = ur;
+		const su2double lmb3 = ur + a;
+
+		// Inverse of the eigenvalues.
+		const su2double ovlmb1 = one/lmb1;
+		const su2double ovlmb2 = one/lmb2; 
+		const su2double ovlmb3 = one/lmb3;
+
+		// In the below, the variable indices in dSolDrR, dSolDsR, dSolDtR are:
+		//  [0]: rho,    [1]: u,    [2]: v,    [3]: w,    [4]: p.
+
+		// Compute the differential of the entropy: ds = drho - ova2*dp.
+		const su2double dsdr = drhodr - ova2*dpdr; 
+
+		// Compute the differential of the projected vorticity w.r.t. rr-direction: 
+		//   dwi = e_{ijk}*rn[j]*du[k],    where e_{ijk} is the levi-civita symbol.
+		const su2double dw1dr = rn[1]*dwdr - rn[2]*dvdr;
+		const su2double dw2dr = rn[2]*dudr - rn[0]*dwdr;
+		const su2double dw3dr = rn[0]*dvdr - rn[1]*dudr;
+
+		// The derivative of the rr-projected velocity in the normal rr-direction.
+		const su2double durdr = rn[0]*dSolDrR[1][l] 
+			                    + rn[1]*dSolDrR[2][l] 
+													+ rn[2]*dSolDrR[3][l]; 
+		
+		// Assemble the internal-based (-)normal wave amplitude. 
+		// Note, the entropy/vorticity wave amplitudes need not be constructed
+		// since they will always be overwritten by the external part.
+		// Note, if there is no coupling specified, then these are already zero.
+		if( IsCoupled )
+		{
+			LL[0] = half*lmb1*( ovrhoa*dpdr - durdr );
+			LL[4] = half*lmb3*( ovrhoa*dpdr + durdr );
+		}
+
+		// Compute the local kinetic energy.
+		const su2double ek    = half*( u*u + v*v + w*w );
+		// Compute the magnitude of the velocity and its square.
+		const su2double magU2 = two*ek;
+		const su2double magU  = SQRT( magU2 );
+		// Compute the Mach number squared.
+		const su2double M2    = magU2/a2;
+
+		// Abbreviation for the function used in the total variable computations.
+    const su2double ff = one + half*gm1*M2;
+
+		// Compute the local total pressure and total temperature.
+		const su2double Pt = p*POW(ff, govgm1);
+		const su2double Tt = T*ff;
+
+		// Compute the local direction angles cos(theta) and cos(phi).
+		const su2double Zt = v/magU; // cos(theta).
+		const su2double Zp = w/magU; // cos( phi ).
+
+		// Abbreviation for the relaxation parameter involving the speed of sound.
+		const su2double ka = kk*a;
+
+		// Difference between the internal and external/reference data.
+		const su2double X1 = ka*( Pt - PtInf ); // total pressure:    dPt.
+		const su2double X2 = ka*( Tt - TtInf ); // total temperature: dTt.
+		const su2double X3 = ka*( Zt - ZtInf ); // cos( theta ):      dZt.
+		const su2double X4 = ka*( Zp - ZpInf ); // cos(  phi  ):      dZp.
+
+
+		// Some useful abbreviations for the coefficients needed in the solution 
+		// of the 4x4 system of equations analytically.
+
+		// Some abbreviations.
+		const su2double PtovTt    = Pt/Tt;
+		const su2double ovrPtovTt = ovrg*PtovTt;
+		const su2double Ttovrho   = Tt*ovrho;
+		const su2double govaPt    = GamConstant*ova*Pt;
+		const su2double ekovrho   = ek*ovrho;
+		const su2double gm1ekova  = gm1*ek*ova;
+		const su2double gm1ovaTt  = gm1*ova*Tt;
+		const su2double ovmagU2   = one/magU2;
+
+
+		// Starting with the parameters in the A_i coefficients. 
+		const su2double gp = gm1ekova + ur;
+		const su2double gm = gm1ekova - ur;
+		const su2double f1 = w1 - rn[0]*ekovrho;
+		const su2double f2 = w2 - rn[1]*ekovrho;
+		const su2double f3 = w3 - rn[2]*ekovrho;
+
+		// Assemble the A_i coefficients.
+		const su2double A1 = gp*ovrPtovTt - govaPt;
+		const su2double A2 = f1*ovrPtovTt;
+		const su2double A3 = f2*ovrPtovTt;
+		const su2double A4 = f3*ovrPtovTt;
+		const su2double A5 = gm*ovrPtovTt - govaPt;
+
+		// Assemble the B_i coefficients.
+		const su2double B1 = gp*ovcp - gm1ovaTt;
+		const su2double B2 = f1*ovcp + rn[0]*Ttovrho;
+		const su2double B3 = f2*ovcp + rn[1]*Ttovrho;
+		const su2double B4 = f3*ovcp + rn[2]*Ttovrho;
+		const su2double B5 = gm*ovcp - gm1ovaTt;
+
+		// Assemble the C_i coefficients.
+		const su2double C1 =  (rn[1]*magU - ur*Zt)*ovmagU2;
+		const su2double C2 = -(rn[2]*magU + w1*Zt)*ovmagU2;
+		const su2double C3 =  (           - w2*Zt)*ovmagU2;
+		const su2double C4 =  (rn[0]*magU - w3*Zt)*ovmagU2;
+		const su2double C5 = -C1;
+
+		// Assemble the D_i coefficients.
+		const su2double D1 =  (rn[2]*magU - ur*Zp)*ovmagU2;
+		const su2double D2 =  (rn[1]*magU - w1*Zp)*ovmagU2;
+		const su2double D3 = -(rn[0]*magU + w2*Zp)*ovmagU2;
+		const su2double D4 =  (           - w3*Zp)*ovmagU2;
+		const su2double D5 = -D1;
+
+
+		// Assemble the internal acoustic coefficients, termed vector Y.
+		const su2double Y1 = LL[iPsi]*A1;
+		const su2double Y2 = LL[iPsi]*B1;
+		const su2double Y3 = LL[iPsi]*C1;
+		const su2double Y4 = LL[iPsi]*D1;
+
+
+		// Some abbreviations used in the E_i coefficients.
+		const su2double ovA2 = one/A2;
+
+		// Assemble the E_i coefficients and P2.
+		const su2double E0 =  ovA2*X1;
+		const su2double E3 = -ovA2*A3;
+		const su2double E4 = -ovA2*A4;
+		const su2double E5 = -ovA2*A5;
+		const su2double P2 = -ovA2*Y1;
+
+		// Some abbreviations used in the F_i coefficients.
+		const su2double ovdenomF = one/(D3 + D2*E3);
+
+		// Assemble the F_i coefficients and P3.
+		const su2double F0 =  ovdenomF*(X4 - D2*E0);
+		const su2double F4 = -ovdenomF*(D4 + D2*E4);
+		const su2double F5 = -ovdenomF*(D5 + D2*E5);
+		const su2double P3 = -ovdenomF*(Y4 + D2*P2);
+
+		// Some abbreviations used in the G_i coefficients.
+		const su2double ovdenomG = one/(C4 + C2*E4 + C3*F4 + C2*E3*F4);
+
+		// Assemble the G_i coefficients and P4.
+		const su2double G0 =  ovdenomG*(X3 - C2*E0 - C3*F0 - C2*E3*F0);
+		const su2double G5 = -ovdenomG*(C5 + C2*E5 + C3*F5 + C2*E3*F5);
+		const su2double P4 = -ovdenomG*(Y3 + C2*P2 + C3*P3 + C2*E3*P3);
+		
+		// Some abbreviations used in the H_i coefficients.
+		const su2double ovdenomH = one/(B5 + B2*E5 + B3*F5 + B4*G5 + B2*E3*F5 + B2*E4*G5 + B3*F4*G5 + B2*E3*F4*G5);
+
+		// Assemble the H_i coefficients and P5.
+		const su2double H0 =  ovdenomH*(X2 - B2*E0 - B3*F0 - B4*G0 - B2*E3*F0 - B2*E4*G0 - B3*F4*G0 - B2*E3*F4*G0);
+		const su2double P5 = -ovdenomH*(Y2 + B2*P2 + B3*P3 + B4*P4 + B2*E3*P3 + B2*E4*P4 + B3*F4*P4 + B2*E3*F4*P4);
+	
+
+		// Construct the incoming wave amplitudes via the above coefficients. 
+		LL[iPhi] = H0                                     + P5;
+		LL[3]    = G0                       + G5*LL[iPhi] + P4;
+		LL[2]    = F0            + F4*LL[3] + F5*LL[iPhi] + P3;
+		LL[1]    = E0 + E3*LL[2] + E4*LL[3] + E5*LL[iPhi] + P2;
+
+
+		// Note, the convective wave amplitudes are premultiplied by ovlmb2, 
+		// in order to reduce computations later on.
+		LL[1] *= ovlmb2;
+		LL[2] *= ovlmb2;
+		LL[3] *= ovlmb2;
+
+
+
+		// Reconstruct the boundary-conforming normal derivative of the
+		// primitive variables. Note, these are stored in dSolDrR. Note,
+		// there is no need to multiply the convective entries in LL by 
+		// the inverse of lmb2, since these are already done so during
+		// the assembly of the external LL state.
+		
+		// Construct: drhodr.
+		dSolDrR[0][l] =  ovlmb1*rhova*LL[0]
+			            +         rn[0]*LL[1]
+									+         rn[1]*LL[2]
+									+         rn[2]*LL[3]
+									+  ovlmb3*rhova*LL[4];
+		
+		// Construct: dudr.
+		dSolDrR[1][l] = -ovlmb1*rn[0]*LL[0]
+			            -         rn[2]*LL[2]
+									+         rn[1]*LL[3]
+									+  ovlmb3*rn[0]*LL[4];
+
+		// Construct: dvdr.
+		dSolDrR[2][l] = -ovlmb1*rn[1]*LL[0]
+			            +         rn[2]*LL[1]
+									-         rn[0]*LL[3]
+									+  ovlmb3*rn[1]*LL[4];
+
+		// Construct: dwdr.
+		dSolDrR[3][l] = -ovlmb1*rn[2]*LL[0]
+			            -         rn[1]*LL[1]
+									+         rn[0]*LL[2]
+									+  ovlmb3*rn[2]*LL[4];
+
+		// Construct: dpdr.
+		dSolDrR[4][l] =  ovlmb1*rhoa*LL[0]
+			            +  ovlmb3*rhoa*LL[4];
+
+		// Form the B matrix, which is used in the PC-reconstruction process.
+		// Note, use dSolDsR as temporary storage for the matrix B. Recall, 
+		// dSolDrR contains the boundary-conforming primitive derivative. 
+		// Obviously, both derivatives are taken in the normal (rr-)direction.
+		dSolDsR[0][l] = dSolDrR[0][l] - ( drhodr - rho*dell ); // density.  
+		dSolDsR[1][l] = dSolDrR[1][l] - ( dudr   -   u*dell ); // u-velocity.
+		dSolDsR[2][l] = dSolDrR[2][l] - ( dvdr   -   v*dell ); // v-velocity.
+		dSolDsR[3][l] = dSolDrR[3][l] - ( dwdr   -   w*dell ); // w-velocity.
+		dSolDsR[4][l] = dSolDrR[4][l] - ( dpdr   -   p*dell ); // pressure.
+	}
+
 
 	// Approximate the primitive variable state from the boundary-conforming
 	// normal wave amplitude via a PC-approach. Then, convert the primitive 

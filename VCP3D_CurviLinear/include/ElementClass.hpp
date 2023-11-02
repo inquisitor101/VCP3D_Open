@@ -42,6 +42,25 @@ public:
   // The local indices of the element.
   int mLocalInd[3];
 
+	// Whether or not this is a sponge layer element. Default is false.
+	bool mSpongeLayerElement;
+
+	// Whether this is a sponge layer in each direction. Default is false.
+	bool mSpongeXMIN;
+	bool mSpongeXMAX;
+	bool mSpongeYMIN;
+	bool mSpongeYMAX;
+	bool mSpongeZMIN;
+	bool mSpongeZMAX;
+
+	// Matching layer scaling factors used in the damping function normalization.
+	su2double mMatchingScaleXMIN;
+	su2double mMatchingScaleXMAX;
+	su2double mMatchingScaleYMIN;
+	su2double mMatchingScaleYMAX;
+	su2double mMatchingScaleZMIN;
+	su2double mMatchingScaleZMAX;
+
   // Vector of arrays with the coordinates of the nodal grid DOFs.
   std::vector<su2double *> mCoorNodalGridDOFs;
 
@@ -78,6 +97,12 @@ public:
   // Vector of arrays with the metric terms in the volume solution DOFs.
   std::vector<su2double *> mVolMetricSolDOFs;
 
+	// Vector of arrays of the damping function in a sponge layer.
+	std::vector<su2double *> mDampingFunction;
+
+	// Vector of arrays of the target-state being damped against in a sponge layer.
+	std::vector<su2double *> mDampingState;
+
   // Vector of arrays of the solution for the modal form.
   std::vector<su2double *> mSol;
 
@@ -89,8 +114,8 @@ public:
 
   // Array with the average of the eddy viscosity in the DOFs.
   su2double *mAveEddyVis;
-  
-  // Vector of arrays of the old solution for the modal form, needed for Runge Kutta.
+
+	// Vector of arrays of the old solution for the modal form, needed for Runge Kutta.
   std::vector<su2double *> mSolOld;
 
   // Vector of arrays of the residuals for the modal form.
@@ -387,6 +412,14 @@ public:
                       const bool                 ComputeMonitoringData,
                       su2double                  &Mach2Max,
                       su2double                  &EddyVisMax);
+
+	// Function, which configures a sponge layer element.
+	void ConfigureSpongeLayer(const InputParamClass      *inputParam,
+			                      const StandardElementClass *standardHex);
+
+	// Function, which initializes the damping state in a sponge layer.
+	void InitializeDampingState(const InputParamClass      *inputParam,
+			                        const StandardElementClass *standardHex);
 
 private:
   //--------------------------------------

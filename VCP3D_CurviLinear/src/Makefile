@@ -10,7 +10,7 @@
 MAKE = make -j 8
 DEPENDENCIES = ./Dependencies
 
-CXX = mpicxx -std=c++11 -fopenmp
+CXX = mpicxx -std=c++11 -fopenmp 
 #CXX = g++ -std=c++11 -fopenmp
 
 LINKER = $(CXX)
@@ -65,6 +65,7 @@ CXX_SOURCES_1 = InputParamClass.cpp\
 
 CXX_SOURCES_2 = adt_structure.cpp\
 	        BoundaryState.cpp\
+					SpongeLayer.cpp\
 	        CG_MassMatrix.cpp\
 	        ElementClass.cpp\
 	        ExchangeDataWallModelClass.cpp\

@@ -1,3 +1,8 @@
 # VCP3D_Open
 
-This is an extension of an in-house discontinuous Galerkin (DG-)Finite Element Method (FEM) code developed by Edwin van der Weide, such that it can handle open boundary conditions using the polynomial-correction (PC-)Navier-Stokes Characteristic boundary condition (NSCBC).
+This is an open-source version of an in-house single-block discontinuous Galerkin (DG-)Finite Element Method (FEM) code developed by Edwin van der Weide. My current contribution was to extend its capabilities, such that it is able handle open boundary via non-reflective boundary conditions (NRBCs). The NRBCs considered in this code are:
+
+* Polynomial-Correction (PC-)Navier-Stokes Characteristic Boundary Condition (NSCBC).
+* Characteristic Matching Layer (CML).
+* Sponge Layer.
+

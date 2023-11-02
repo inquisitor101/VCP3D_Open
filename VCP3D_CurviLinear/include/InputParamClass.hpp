@@ -51,6 +51,10 @@ public:
   // Function, which writes the header for the time step history.
   void WriteHeaderTimeStepHistory(void);
 
+  // Function to read the sponge layer data.
+  void ReadSpongeLayerData(const char *fileName);
+
+
   //------------------------------------------
   // Public member variables.
   //------------------------------------------
@@ -119,6 +123,10 @@ public:
 	su2double mPulseStrength;
 	// Pulse radial width.
 	su2double mPulseWidth;
+	// Whether it is a 1D pulse.
+	bool      mPulse1D;
+	// Direction of the 1D (x-)pulse.
+	su2double mPulseDirection1D;
 	// Quiescent flow simulation (all outlets, M = 0).
 	bool mQuiescentFlow;
 
@@ -231,10 +239,29 @@ public:
 
 	// NSCBC inlet length scale.
 	su2double mNSCBC_Inlet_len;	
-	// NSCBC inlet relaxation coefficient for normal     wave amplitude. 
+	// NSCBC inlet relaxation coefficient for normal wave amplitude. 
 	su2double mNSCBC_Inlet_sigma;
-	// NSCBC inlet relaxation coefficient for transverse wave amplitude.
-	su2double mNSCBC_Inlet_beta;	
+	// Type of reconstruction in the inlet NSCBC: whether or not to use
+	// the outgoing wave amplitude in the reconstruction process.
+	// Default is yes. Note, this means for a total inlet NSCBC, this is reflecting.
+	bool mNSCBC_Inlet_incoming;
+
+	// Whether or not to use a characteristic matching layer.
+	bool mCharacteristicMatchingLayer;
+
+	// Whether or not to use a sponge layer. Default is no.
+	bool mSpongeLayer;
+	// Whether or not a sponge layer is used, per block face.
+	bool mSpongeLayerSpecified[6];
+	// Number of elements in each layer, per block face.
+	int  mNSpongeLayerElements[6];
+	// Damping constant in each layer, per block face.
+	su2double mDampingConstant[6];
+	// Damping exponent in each layer, per block face.
+	su2double mDampingExponent[6];
+
+  // Name of the averaged solution file used in a sponge layer.
+  std::string mAveragedSolutionFile;
 
 private:
   //------------------------------------------------

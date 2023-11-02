@@ -29,6 +29,9 @@ int main(int argc, char **argv)
   InputParamClass inputParam;
   inputParam.ReadInputParameters(argv[1]);
 
+	// Read the sponge layer information, if specified.
+	if( inputParam.mSpongeLayer || inputParam.mCharacteristicMatchingLayer ) inputParam.ReadSpongeLayerData(argv[1]);
+
   // Read the subface information and the prescribed boundary data.
   inputParam.ReadSubfaceInformation(argv[1]);
   inputParam.ReadBoundaryData(argv[1]);
@@ -51,6 +54,10 @@ int main(int argc, char **argv)
   // Initializes the solution. Overwrite when a restart is performed.
   solver.InitSol();
   if( inputParam.mRestart ) solver.ReadRestartSolution();
+
+	// If a sponge layer is specified, initialize the layers and then 
+	// proceed to read the averaged solution used as the damping state.
+	if( inputParam.mSpongeLayer ) solver.InitSpongeLayer();	
 
   // Determine the prescribed boundary conditions in the
   // integration points of boundary faces.

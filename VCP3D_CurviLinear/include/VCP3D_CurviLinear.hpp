@@ -223,21 +223,22 @@ enum ENUM_RIEMANN {
 };
 
 enum ENUM_BOUNDARY_CONDITIONS {
-  INTERNAL_1TO1             =  0,
-  PERIODIC_1TO1_TRANS       =  1,
-  PERIODIC_1TO1_ROT         =  2,
-  BC_FARFIELD               =  3,
-  BC_ISOTHERMAL_WALL        =  4,
-  BC_HEATFLUX_WALL          =  5,
-  BC_INVISCID_WALL          =  6,
-  BC_SYMMETRY               =  7,
-  BC_INFLOW_SUBSONIC        =  8,
-  BC_INFLOW_SUPERSONIC      =  9,
-  BC_OUTFLOW_SUBSONIC       = 10,
-  BC_OUTFLOW_SUPERSONIC     = 11,
-	BC_INFLOW_CHARACTERISTIC  = 12,
-	BC_OUTFLOW_CHARACTERISTIC = 13,
-	BC_UNDEFINED_TYPE         = 99
+  INTERNAL_1TO1                   =  0,
+  PERIODIC_1TO1_TRANS             =  1,
+  PERIODIC_1TO1_ROT               =  2,
+  BC_FARFIELD                     =  3,
+  BC_ISOTHERMAL_WALL              =  4,
+  BC_HEATFLUX_WALL                =  5,
+  BC_INVISCID_WALL                =  6,
+  BC_SYMMETRY                     =  7,
+  BC_INFLOW_SUBSONIC              =  8,
+  BC_INFLOW_SUPERSONIC            =  9,
+  BC_OUTFLOW_SUBSONIC             = 10,
+  BC_OUTFLOW_SUPERSONIC           = 11,
+	BC_INFLOW_STATIC_CHARACTERISTIC = 12,
+	BC_INFLOW_TOTAL_CHARACTERISTIC  = 13,
+	BC_OUTFLOW_CHARACTERISTIC       = 14,
+	BC_UNDEFINED_TYPE               = 99
 };
 
 enum ENUM_WALL_MODEL {

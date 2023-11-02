@@ -93,6 +93,31 @@ public:
                          const double    time0,
                          const su2double *monitoringData);
 
+  // Function, which reads the averaged solution in the sponge layer.
+  void ReadAveragedSolutionSpongeLayer(void);
+
+	// Function, which initializes the sponge layer elements.
+	void InitSpongeLayer(void);
+
+	// Function, which sets up a sponge layer in the IMIN direction.
+	bool SetUpSpongeLayerIMIN(void);
+	// Function, which sets up a sponge layer in the IMAX direction.
+	bool SetUpSpongeLayerIMAX(void);
+
+	// Function, which sets up a sponge layer in the JMIN direction.
+	bool SetUpSpongeLayerJMIN(void);
+	// Function, which sets up a sponge layer in the JMAX direction.
+	bool SetUpSpongeLayerJMAX(void);
+
+	// Function, which sets up a sponge layer in the KMIN direction.
+	bool SetUpSpongeLayerKMIN(void);
+	// Function, which sets up a sponge layer in the KMAX direction.
+	bool SetUpSpongeLayerKMAX(void);
+
+
+
+
+
 #ifdef HAVE_MPI
   // Function, which releases the memory of the persistent communication requests.
   void FreeCommRequests(void);
@@ -291,7 +316,7 @@ private:
   void CheckMatchingSubfaces(void);
 
   // Function, which determines the precision of the restart file.
-  short DeterminePrecisionRestartFile(void);
+  short DeterminePrecisionRestartFile(const char *filename);
 
   // Function, which determines the visualization data.
   void DetermineVisualizationData(std::vector<std::string> &visNames,
@@ -323,6 +348,14 @@ private:
                                    const int        nVarRestart,
                                    const bool       byteSwap,
                                    const MPI_Offset sizeHeader);
+
+  // Function to read the averaged variables from the restart file. 
+	// It is a template function, such that different precisions can be handled.
+  template <class T>
+  void ReadSpongeLayerSolutionFromRestartFile(MPI_File         &fh,
+                                              const int        nVarRestart,
+                                              const bool       byteSwap,
+                                              const MPI_Offset sizeHeader);
 #else
   // Function to read the grid coordinates from the grid file. It is a
   // template function, such that different precisions can be handled.
@@ -340,6 +373,13 @@ private:
   void ReadSolutionFromRestartFile(FILE       *&restartFile,
                                    const int  nVarRestart,
                                    const bool byteSwap);
+
+  // Function to read the averaged variables from the restart file. 
+	// It is a template function, such that different precisions can be handled.
+  template <class T>
+  void ReadSpongeLayerSolutionFromRestartFile(FILE       *&restartFile,
+                                              const int  nVarRestart,
+                                              const bool byteSwap);
 #endif
 
   //------------------------------------------------
@@ -510,6 +550,102 @@ void SolverClass::ReadSolutionFromRestartFile(MPI_File         &fh,
   MPI_Type_free(&readType);
 }
 
+//------------------------------------------------------------------------------
+
+// Implementation of the template function ReadSpongeLayerSolutionFromRestartFile.
+// This function reads the solution using the parallel MPI IO functionality.
+template <class T>
+void SolverClass::ReadSpongeLayerSolutionFromRestartFile(MPI_File         &fh,
+                                                         const int        nVarRestart,
+                                                         const bool       byteSwap,
+                                                         const MPI_Offset sizeHeader)
+{
+  // Easier storage of the total number of elements in the three index directions.
+  const int nElemI = mInputParam->mSubfaces[1][0]->mElemIBeg;
+  const int nElemJ = mInputParam->mSubfaces[3][0]->mElemJBeg;
+  const int nElemK = mInputParam->mSubfaces[5][0]->mElemKBeg;
+
+  // Determine the number of variables to read from the restart file.
+	// Note, this must be a restart file, thus it's: nVar + (nVar+7).
+  const int nVarRead = 2*nVar + 7;
+
+  // Check if enough variables are present in the restart file. The additional 3
+  // comes from the coordinates that are also stored in the restart file.
+  if(nVarRestart < (nVarRead+3))
+    TerminateAll("SolverClass::ReadSpongeLayerSolutionFromRestartFile", __FILE__, __LINE__,
+                 "Not enough variables present in the averaged solution file.");
+
+  // Determine the corresponding MPI datatype.
+  T dummyT = 0;  // It is initialized to avoid a compiler warning.
+  MPI_Datatype dataType = DetermineMPI_Type(dummyT);
+
+  // Define the variables to create the subarray data type for the actual IO.
+  const int gsizes[]   = {nVarRestart, (int) mStandardHex.mNDOFs, nElemI, nElemJ, nElemK};
+  const int lsizes[]   = {nVarRead, (int) mStandardHex.mNDOFs, mNElemPerRankI, mNElemPerRankJ,
+                          mNElemPerRankK};
+  const int startInd[] = {3, 0, mMyRankI*mNElemPerRankI, mMyRankJ*mNElemPerRankJ,
+                          mMyRankK*mNElemPerRankK};
+
+  // Create the derived datatype for the reading.
+  MPI_Datatype readType;
+  MPI_Type_create_subarray(5, gsizes, lsizes, startInd, MPI_ORDER_FORTRAN,
+                           dataType, &readType);
+  MPI_Type_commit(&readType);
+
+  // Create the file view needed for the collective read. The offset is set
+  // to the position where the data of the element starts;
+  char datarep[] = "native";
+  MPI_File_set_view(fh, sizeHeader, dataType, readType, datarep, MPI_INFO_NULL);
+
+  // Allocate the memory for the read buffer.
+  std::vector<T> readBuf(lsizes[0]*lsizes[1]*lsizes[2]*lsizes[3]*lsizes[4]);
+
+  // Read the data using one collective read.
+  if(MPI_File_read_all(fh, readBuf.data(), readBuf.size(),
+                       dataType, MPI_STATUS_IGNORE) != MPI_SUCCESS)
+    TerminateAll("SolverClass::ReadSpongeLayerSolutionFromRestartFile", __FILE__, __LINE__,
+                 "MPI_File_read_all was not able to read data from file.");
+
+  // Carry out the byte swapping, if needed.
+  if( byteSwap ) SwapBytes(readBuf.data(), sizeof(T), readBuf.size());
+
+  // Loop over the elements and copy the data from the read buffer into
+  // the data structures of the element.
+  long ii = 0;
+  for(int k=1; k<=mNElemPerRankK; ++k)
+  {
+    for(int j=1; j<=mNElemPerRankJ; ++j)
+    {
+      for(int i=1; i<=mNElemPerRankI; ++i)
+      {
+        for(int m=0; m<mStandardHex.mNDOFs; ++m)
+        {
+					// Offset the first nVar non-averaged working variables.
+					ii += nVar;
+         	// Read the averaged primitive variables, only if this is a sponge layer.
+					// Otherwise, skip  the ii index by nVar.
+					// Note, the damping state is stored temporarily in mSolOld as primitive 
+					// variables, this needs conversion later one to the working variables.
+					if( mElements[i][j][k]->mSpongeLayerElement )
+					{
+						for(int l=0; l<nVar; ++l, ++ii)
+							mElements[i][j][k]->mSolOld[l][m] = (su2double) readBuf[ii];
+					}
+					else ii += nVar;
+
+					// Offset the remaining averaged velocity products (6) and eddy viscosity (1).
+					ii += 7;
+        }
+      }
+    }
+  }
+
+  // Release the memory of the derived data type used for the reading.
+  MPI_Type_free(&readType);
+}
+
+
+
 #else
 // Implementation of the template function ReadGridCoordinates.
 // This function reads the coordinates from the current position in the grid file.
@@ -603,5 +739,74 @@ void SolverClass::ReadSolutionFromRestartFile(FILE       *&restartFile,
     }
   }
 }
+
+//------------------------------------------------------------------------------
+
+// Implementation of the template function ReadSpongeLayerSolutionFromRestartFile.
+// This function reads the solution from the current position in the restart file.
+template <class T>
+void SolverClass::ReadSpongeLayerSolutionFromRestartFile(FILE       *&restartFile,
+                                                         const int  nVarRestart,
+                                                         const bool byteSwap)
+{
+  // Determine the number of variables to read from the restart file.
+	// Note, this must be a restart file, thus it's: nVar + (nVar+7).
+  const int nVarRead = 2*nVar + 7;
+
+  // Check if enough variables are present in the restart file. The additional 3
+  // comes from the coordinates that are also stored in the restart file.
+  if(nVarRestart < (nVarRead+3))
+    TerminateAll("SolverClass::ReadSpongeLayerSolutionFromRestartFile", __FILE__, __LINE__,
+                 "Not enough variables present in the averaged solution file.");
+
+  // Allocate the memory for the read buffer.
+  const int sizeRead = mStandardHex.mNDOFs*nVarRestart;
+  std::vector<T> readBuf(sizeRead);
+
+  // Loop over the owned element range.
+  for(int k=1; k<=mNElemPerRankK; ++k)
+  {
+    for(int j=1; j<=mNElemPerRankJ; ++j)
+    {
+      for(int i=1; i<=mNElemPerRankI; ++i)
+      {
+        // Read the buffer from file and check if it went OK.
+        if(std::fread(readBuf.data(), sizeof(T), sizeRead, restartFile) != (unsigned int) sizeRead)
+          Terminate("SolverClass::ReadSpongeLayerSolutionFromRestartFile", __FILE__, __LINE__,
+                    "Averaged solution could not be read");
+
+        // Carry out the byte swapping, if needed.
+        if( byteSwap ) SwapBytes(readBuf.data(), sizeof(T), sizeRead);
+
+        // Loop over the DOFs.
+        for(int m=0; m<mStandardHex.mNDOFs; ++m)
+        {
+          // Set the pointer in readBuf where the solution data of this DOF starts.
+          // The additional 3 is there to skip the three coordinates.
+          T *buf = readBuf.data() + m*nVarRestart + 3;
+
+          // Copy only the relevant averaged data from the read buffer into the 
+					// data structures of the element, if it is a sponge layer.
+          int ii = nVar; 
+
+         	// Read the averaged primitive variables, only if this is a sponge layer.
+					// Otherwise, increment the ii index by nVar.
+					// Note, the damping state is stored temporarily in mSolOld as primitive 
+					// variables, this needs conversion later one to the working variables.
+					if( mElements[i][j][k]->mSpongeLayerElement )
+					{
+						for(int l=0; l<nVar; ++l, ++ii)
+							mElements[i][j][k]->mSolOld[l][m] = (su2double) buf[ii];
+					}
+					else ii += nVar;
+
+					// Offset the remaining averaged velocity products (6) and eddy viscosity (1).
+					ii += 7;
+        }
+      }
+    }
+  }
+}
+
 
 #endif

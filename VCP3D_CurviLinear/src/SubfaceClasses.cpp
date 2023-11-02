@@ -386,6 +386,12 @@ int SubfaceBaseClass::GetTypeBoundaryPrescribed(void) {return BC_UNDEFINED_TYPE;
 
 //------------------------------------------------------------------------------
 
+// Virtual function, which determines whether or not the boundary is of 
+// a characteristic nature (inlet or outlet).
+bool SubfaceBaseClass::IsCharacteristicBC(void) {return false;}
+
+//------------------------------------------------------------------------------
+
 // Overloaded constructor of Internal1to1SubfaceClass.
 Internal1to1SubfaceClass::Internal1to1SubfaceClass(std::istringstream &istr)
  : SubfaceBaseClass(istr)
@@ -1257,6 +1263,15 @@ void BCStandardCharacteristicSubfaceClass::SetMachAverageBoundary(const su2doubl
 	mMachAverageBoundary = Mavg;
 }
 
+//------------------------------------------------------------------------------
+
+// Function, which flags that this is a characteristic boundary.
+bool BCStandardCharacteristicSubfaceClass::IsCharacteristicBC(void)
+{
+	return true;
+}
+
+
 
 
 
@@ -1370,7 +1385,7 @@ void BCOutflowCharacteristicSubfaceClass::ConfigureParamNSCBC(
 
 
 //------------------------------------------------------------------------------
-// Characteristic BC: Inlet 
+// Characteristic BC: Inlet (generic) 
 //------------------------------------------------------------------------------
 
 // Overloaded constructor of BCInflowCharacteristicSubfaceClass.
@@ -1381,140 +1396,6 @@ BCInflowCharacteristicSubfaceClass::BCInflowCharacteristicSubfaceClass(std::istr
 
 // Destructor. Nothing to be done.
 BCInflowCharacteristicSubfaceClass::~BCInflowCharacteristicSubfaceClass(){}
-
-//------------------------------------------------------------------------------
-
-// Function, which makes available the number of prescribed variables.
-int BCInflowCharacteristicSubfaceClass::GetNVarPrescribed(void) 
-{
-	// If the total conditions are specified, nVar variables must be
-	// prescribed, otherwise nVar-1.
-	if( mTotalConditionsSpecified ) return nVar;
-	else                            return nVar-1;
-}
-
-//------------------------------------------------------------------------------
-
-// Function, which gets the type of boundary prescribed. 
-int BCInflowCharacteristicSubfaceClass::GetTypeBoundaryPrescribed(void) {return BC_INFLOW_CHARACTERISTIC;}
-
-//------------------------------------------------------------------------------
-
-// Function, which converts the prescribed data to the required form.
-void BCInflowCharacteristicSubfaceClass::ConvertPrescribedData(
-                             const int                nIntegration,
-                             const ENUM_FEM_VARIABLES FEMVariables,
-                             std::vector<su2double *> &prescribedData)
-{
-  // Compute the inverse of the reference conditions.
-  const su2double rhoRefInv = one/rhoRef;
-  const su2double uRefInv   = one/uRef;
-  //const su2double pRefInv   = one/pRef;
-
-  // Determine which set of variables have been prescribed.
-  if( mTotalConditionsSpecified )
-  {
-		// TODO
-		// Must implement the total-conditions inlet via characteristic relations. 
-		// For reference, see: Odier et al. (2019).
-		TerminateAll("BCInflowCharacteristicSubfaceClass::ConvertPrescribedData", __FILE__, __LINE__,
-								 "Characteristic total conditions not yet implemented.");
-  }
-  else
-  {
-    // Density and velocities are specified. Loop over the integration
-    // points and non-dimensionalize them.
-#pragma omp simd
-    for(int l=0; l<nIntegration; ++l)
-    {
-      prescribedData[0][l] *= rhoRefInv;
-      prescribedData[1][l] *= uRefInv;
-      prescribedData[2][l] *= uRefInv;
-      prescribedData[3][l] *= uRefInv;
-    }
-  }
-}
-
-//------------------------------------------------------------------------------
-
-// Function, which gets the names of the prescribed variables for the given set.
-void BCInflowCharacteristicSubfaceClass::GetNamesPrescibedVariables(const int                set,
-                                                                    std::vector<std::string> &varNames)
-{
-  // For a subsonic inflow boundary, there are two options for the prescribed
-  // data. Make a distinction between the sets and set the data accordingly.
-  switch( set )
-  {
-    case 0:
-    {
-			// The first set of variables. Total data and velocity direction are prescribed.
-      varNames.push_back("TotalPressure");
-      varNames.push_back("TotalTemperature");
-      varNames.push_back("VelocityDirX");
-      varNames.push_back("VelocityDirY");
-      varNames.push_back("VelocityDirZ");
-      
-			break;
-    }
-
-    case 1:
-    {
-      // The second set of variables. Density and velocities are prescribed.
-      varNames.push_back("Density");
-      varNames.push_back("VelocityX");
-      varNames.push_back("VelocityY");
-      varNames.push_back("VelocityZ");
-
-      break;
-    }
-
-    default:
-      TerminateAll("BCInflowCharacteristicSubfaceClass::GetNamesPrescibedVariables",
-                   __FILE__, __LINE__, "This should not happen");
-  }
-}
-
-//------------------------------------------------------------------------------
-
-// Function, which returns the number of data sets that can be prescribed.
-int BCInflowCharacteristicSubfaceClass::GetNSetsPrescribedVariables(void){return 2;}
-
-//------------------------------------------------------------------------------
-
-// Function, which indicates whether prescribed data is expected.
-bool BCInflowCharacteristicSubfaceClass::ExpectPrescribedData(void){return true;}
-
-//------------------------------------------------------------------------------
-
-// Function, which determines the indices for the prescribed data.
-void BCInflowCharacteristicSubfaceClass::SetIndicesPrescribedData(const int set)
-{
-  // Determine the set that has been prescribed.
-  if(set == 0)
-  {
-    // Total conditions have been specified.
-    // Set mTotalConditionsSpecified to true.
-    mTotalConditionsSpecified = true;
-
-		// TODO
-		// Must implement the total-conditions inlet via characteristic relations. 
-		// For reference, see: Odier et al. (2019).
-		TerminateAll("BCInflowCharacteristicSubfaceClass::SetIndicesPrescribedData", __FILE__, __LINE__,
-								 "Characteristic total conditions not yet implemented.");
-	}
-  else
-  {
-    // Density and velocities are prescribed.
-    // Set mTotalConditionsSpecified to false.
-    mTotalConditionsSpecified = false;
-
-    // Set the indices for the corresponding variables.
-    mIndicesPrescribedData.push_back(GetIndexPrescribedData("Density"));
-    mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityX"));
-    mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityY"));
-    mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityZ"));
-  }
-}
 
 //------------------------------------------------------------------------------
 
@@ -1542,16 +1423,240 @@ void BCInflowCharacteristicSubfaceClass::ConfigureParamNSCBC(
 	// Set characteristic length scale.
 	mLengthScale    = inputParam->mNSCBC_Inlet_len;
 
-	// Set relaxation coefficients for outlet.
-	mSigma    = inputParam->mNSCBC_Inlet_sigma;
-	mBeta     = inputParam->mNSCBC_Inlet_beta;
+	// Set relaxation coefficients for inlet.
+	mSigma          = inputParam->mNSCBC_Inlet_sigma;
 
 	// Identify the incoming acoustic wave amplitude index.
-	mIndexPhi = (factNorm > zero) ? 0 : 4;   
+	mIndexPhi       = (factNorm > zero) ? 0 : 4;   
+	// Identify the outgoing acoustic wave amplitude index. 
+	mIndexPsi       = (mIndexPhi == 0 ) ? 4 : 0;
 
 	// Identify the relevant indices required for this characteristic boundary.
 	IdentifyBoundaryIndices(metric);
 }
+
+
+
+
+//------------------------------------------------------------------------------
+// Characteristic BC: Inlet (static) 
+//------------------------------------------------------------------------------
+
+// Overloaded constructor of BCInflowStaticCharacteristicSubfaceClass.
+BCInflowStaticCharacteristicSubfaceClass::BCInflowStaticCharacteristicSubfaceClass(std::istringstream &istr)
+ : BCInflowCharacteristicSubfaceClass(istr){}
+
+//------------------------------------------------------------------------------
+
+// Destructor. Nothing to be done.
+BCInflowStaticCharacteristicSubfaceClass::~BCInflowStaticCharacteristicSubfaceClass(){}
+
+//------------------------------------------------------------------------------
+
+// Function, which makes available the number of prescribed variables.
+int BCInflowStaticCharacteristicSubfaceClass::GetNVarPrescribed(void) 
+{
+	return nVar-1;
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which gets the type of boundary prescribed. 
+int BCInflowStaticCharacteristicSubfaceClass::GetTypeBoundaryPrescribed(void) 
+{
+	return BC_INFLOW_STATIC_CHARACTERISTIC;
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which converts the prescribed data to the required form.
+void BCInflowStaticCharacteristicSubfaceClass::ConvertPrescribedData(
+                             const int                nIntegration,
+                             const ENUM_FEM_VARIABLES FEMVariables,
+                             std::vector<su2double *> &prescribedData)
+{
+  // Compute the inverse of the reference conditions.
+  const su2double rhoRefInv = one/rhoRef;
+  const su2double uRefInv   = one/uRef;
+  //const su2double pRefInv   = one/pRef;
+
+  // Density and velocities are specified. Loop over the integration
+  // points and non-dimensionalize them.
+#pragma omp simd
+  for(int l=0; l<nIntegration; ++l)
+  {
+    prescribedData[0][l] *= rhoRefInv;
+    prescribedData[1][l] *= uRefInv;
+    prescribedData[2][l] *= uRefInv;
+    prescribedData[3][l] *= uRefInv;
+  }
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which gets the names of the prescribed variables for the given set.
+void BCInflowStaticCharacteristicSubfaceClass::GetNamesPrescibedVariables(const int                set,
+                                                                          std::vector<std::string> &varNames)
+{
+	// The static and total inflows, along with their respective data sets are separated in different classes.
+	// Thus, make sure there exist only one set.
+	if( set !=  0 )
+		TerminateAll("BCInflowStaticCharacteristicSubfaceClass::GetNamesPrescibedVariables",
+                  __FILE__, __LINE__, "This should not happen");
+
+  // This is the set of static variables. Density and velocities are prescribed.
+  varNames.push_back("Density");
+  varNames.push_back("VelocityX");
+  varNames.push_back("VelocityY");
+  varNames.push_back("VelocityZ");
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which returns the number of data sets that can be prescribed.
+int BCInflowStaticCharacteristicSubfaceClass::GetNSetsPrescribedVariables(void){return 1;}
+
+//------------------------------------------------------------------------------
+
+// Function, which indicates whether prescribed data is expected.
+bool BCInflowStaticCharacteristicSubfaceClass::ExpectPrescribedData(void){return true;}
+
+//------------------------------------------------------------------------------
+
+// Function, which determines the indices for the prescribed data.
+void BCInflowStaticCharacteristicSubfaceClass::SetIndicesPrescribedData(const int set)
+{
+	// The static and total inflows, along with their respective data sets are separated in different classes.
+	// Thus, make sure there exist only one set.
+	if( set !=  0 )
+		TerminateAll("BCInflowStaticCharacteristicSubfaceClass::SetIndicesPrescribedData",
+                  __FILE__, __LINE__, "This should not happen");
+
+  // Set the indices for the corresponding variables.
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("Density"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityX"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityY"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityZ"));
+}
+
+
+
+
+//------------------------------------------------------------------------------
+// Characteristic BC: Inlet (total) 
+//------------------------------------------------------------------------------
+
+// Overloaded constructor of BCInflowTotalCharacteristicSubfaceClass.
+BCInflowTotalCharacteristicSubfaceClass::BCInflowTotalCharacteristicSubfaceClass(std::istringstream &istr)
+ : BCInflowCharacteristicSubfaceClass(istr){}
+
+//------------------------------------------------------------------------------
+
+// Destructor. Nothing to be done.
+BCInflowTotalCharacteristicSubfaceClass::~BCInflowTotalCharacteristicSubfaceClass(){}
+
+//------------------------------------------------------------------------------
+
+// Function, which makes available the number of prescribed variables.
+int BCInflowTotalCharacteristicSubfaceClass::GetNVarPrescribed(void) 
+{
+	return nVar;
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which gets the type of boundary prescribed. 
+int BCInflowTotalCharacteristicSubfaceClass::GetTypeBoundaryPrescribed(void) 
+{
+	return BC_INFLOW_TOTAL_CHARACTERISTIC;
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which converts the prescribed data to the required form.
+void BCInflowTotalCharacteristicSubfaceClass::ConvertPrescribedData(
+                             const int                nIntegration,
+                             const ENUM_FEM_VARIABLES FEMVariables,
+                             std::vector<su2double *> &prescribedData)
+{
+  // Compute the inverse of the reference values.
+  const su2double pRefInv = one/pRef;
+
+	// Compute the reference temperature and its inverse.
+	// Note, division by RGas is skipped, since this produces the same scaling 
+	// used when constructing the temperature in the NSCBC ComputeBoundary.
+	const su2double TRef    = pRef/rhoRef;
+	const su2double TRefInv = one/TRef;
+
+  // Loop over the integration points.
+#pragma omp simd
+  for(int l=0; l<nIntegration; ++l)
+  {
+    // Compute the non-dimensional total pressure and total temperature.
+    prescribedData[0][l] *= pRefInv;
+    prescribedData[1][l] *= TRefInv;
+
+    // Make sure the unit vector really is a unit vector.
+    const su2double len2   = prescribedData[2][l]*prescribedData[2][l]
+                           + prescribedData[3][l]*prescribedData[3][l]
+                           + prescribedData[4][l]*prescribedData[4][l];
+    const su2double lenInv = one/SQRT(len2);
+
+    prescribedData[2][l] *= lenInv;
+    prescribedData[3][l] *= lenInv;
+    prescribedData[4][l] *= lenInv;
+  }
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which gets the names of the prescribed variables for the given set.
+void BCInflowTotalCharacteristicSubfaceClass::GetNamesPrescibedVariables(const int                set,
+                                                                         std::vector<std::string> &varNames)
+{
+	// The static and total inflows, along with their respective data sets are separated in different classes.
+	// Thus, make sure there exist only one set.
+	if( set !=  0 )
+		TerminateAll("BCInflowTotalCharacteristicSubfaceClass::GetNamesPrescibedVariables",
+                  __FILE__, __LINE__, "This should not happen");
+
+	// This is the set of total variables. Total data and velocity direction are prescribed.
+  varNames.push_back("TotalPressure");
+  varNames.push_back("TotalTemperature");
+  varNames.push_back("VelocityDirX");
+  varNames.push_back("VelocityDirY");
+  varNames.push_back("VelocityDirZ");     
+}
+
+//------------------------------------------------------------------------------
+
+// Function, which returns the number of data sets that can be prescribed.
+int BCInflowTotalCharacteristicSubfaceClass::GetNSetsPrescribedVariables(void){return 1;}
+
+//------------------------------------------------------------------------------
+
+// Function, which indicates whether prescribed data is expected.
+bool BCInflowTotalCharacteristicSubfaceClass::ExpectPrescribedData(void){return true;}
+
+//------------------------------------------------------------------------------
+
+// Function, which determines the indices for the prescribed data.
+void BCInflowTotalCharacteristicSubfaceClass::SetIndicesPrescribedData(const int set)
+{
+	// The static and total inflows, along with their respective data sets are separated in different classes.
+	// Thus, make sure there exist only one set.
+	if( set !=  0 )
+		TerminateAll("BCInflowTotalCharacteristicSubfaceClass::SetIndicesPrescribedData",
+                  __FILE__, __LINE__, "This should not happen");
+
+  // Set the indices for the corresponding variables.
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("TotalPressure"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("TotalTemperature"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityDirX"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityDirY"));
+  mIndicesPrescribedData.push_back(GetIndexPrescribedData("VelocityDirZ"));
+}
+
 
 
 
